@@ -1,0 +1,7 @@
+build/
+out/
+__pycache__/
+*.pyc
+.venv/
+*.ofx
+*.ofx.bundle/
