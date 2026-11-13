@@ -175,6 +175,8 @@ __device__ __forceinline__ float3 grain_offset(float3 scene, float4 n, float amo
                        k * grain_lookup(slots.grain + 2 * kGrainTableSize, scene.z) * n.z);
 }
 
+__device__ inline float premult_alpha(float a) { return isfinite(a) ? a : (a > 0.0f ? 1.0f : 0.0f); }
+
 __global__ void film_kernel(const char* src, size_t src_pitch, char* dst, size_t dst_pitch, int width, int height,
                             RenderParams p, SlotSet slots) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
@@ -182,7 +184,7 @@ __global__ void film_kernel(const char* src, size_t src_pitch, char* dst, size_t
     if (x >= width || y >= height) return;
     float4 px = reinterpret_cast<const float4*>(src + y * src_pitch)[x];
     float3 rgb = make_float3(sanitize(px.x), sanitize(px.y), sanitize(px.z));
-    if (p.premultiplied && px.w > 0.0f) rgb = make_float3(rgb.x / px.w, rgb.y / px.w, rgb.z / px.w);
+    if (p.premultiplied && px.w > 0.0f && isfinite(px.w)) rgb = make_float3(rgb.x / px.w, rgb.y / px.w, rgb.z / px.w);
     float3 dec = make_float3(sanitize(decode(p.in_space, rgb.x)), sanitize(decode(p.in_space, rgb.y)),
                              sanitize(decode(p.in_space, rgb.z)));
     float3 w = mul(slots.to_working, dec);
@@ -199,7 +201,7 @@ __global__ void film_kernel(const char* src, size_t src_pitch, char* dst, size_t
     fo = make_float3(encode(p.out_space, fo.x), encode(p.out_space, fo.y), encode(p.out_space, fo.z));
     float4 out = make_float4(ref.x + p.impact * (fo.x - ref.x), ref.y + p.impact * (fo.y - ref.y),
                              ref.z + p.impact * (fo.z - ref.z), px.w);
-    if (p.premultiplied) out = make_float4(out.x * px.w, out.y * px.w, out.z * px.w, px.w);
+    if (p.premultiplied) out = make_float4(out.x * premult_alpha(px.w), out.y * premult_alpha(px.w), out.z * premult_alpha(px.w), px.w);
     reinterpret_cast<float4*>(dst + y * dst_pitch)[x] = out;
 }
 
@@ -275,7 +277,7 @@ SlotSet make_slots(const RenderParams& p, const LutSet& luts) {
 
 __device__ float3 to_lin(float4 px, const RenderParams& p, const SlotSet& slots) {
     float3 rgb = make_float3(sanitize(px.x), sanitize(px.y), sanitize(px.z));
-    if (p.premultiplied && px.w > 0.0f) rgb = make_float3(rgb.x / px.w, rgb.y / px.w, rgb.z / px.w);
+    if (p.premultiplied && px.w > 0.0f && isfinite(px.w)) rgb = make_float3(rgb.x / px.w, rgb.y / px.w, rgb.z / px.w);
     float3 dec = make_float3(sanitize(decode(p.in_space, rgb.x)), sanitize(decode(p.in_space, rgb.y)),
                              sanitize(decode(p.in_space, rgb.z)));
     float3 w = mul(slots.to_working, dec);
@@ -405,7 +407,7 @@ __global__ void region_final(Image src, Rect e, Rect win, const float4* film, ch
     fo = make_float3(encode(p.out_space, fo.x), encode(p.out_space, fo.y), encode(p.out_space, fo.z));
     float4 out = make_float4(ref.x + p.impact * (fo.x - ref.x), ref.y + p.impact * (fo.y - ref.y),
                              ref.z + p.impact * (fo.z - ref.z), px.w);
-    if (p.premultiplied) out = make_float4(out.x * px.w, out.y * px.w, out.z * px.w, px.w);
+    if (p.premultiplied) out = make_float4(out.x * premult_alpha(px.w), out.y * premult_alpha(px.w), out.z * premult_alpha(px.w), px.w);
     reinterpret_cast<float4*>(dst + static_cast<ptrdiff_t>(gy - dst_bounds.y1) * dst_pitch)[gx - dst_bounds.x1] = out;
 }
 
@@ -516,13 +518,19 @@ cudaError_t render_region(Image src, float* dst_base, size_t dst_pitch, Rect dst
     RenderParams p = params;
     p.lut_size = luts.size();
     SlotSet slots = make_slots(p, luts);
-    int m = (p.halation_amount > 0.0f ? blur_margin(p.halation_radius_px) : 0) +
-            (p.bloom_amount > 0.0f ? blur_margin(p.bloom_radius_px) : 0);
+    auto reach = [&](float sigma) { return p.spatial_half ? 2 * blur_margin(0.5f * sigma) + 3 : blur_margin(sigma); };
+    int m = (p.halation_amount > 0.0f ? reach(p.halation_radius_px) : 0) + (p.bloom_amount > 0.0f ? reach(p.bloom_radius_px) : 0);
     Rect e{std::max(win.x1 - m, src.bounds.x1), std::max(win.y1 - m, src.bounds.y1), std::min(win.x2 + m, src.bounds.x2),
            std::min(win.y2 + m, src.bounds.y2)};
+    bool half = p.spatial_half != 0;
+    if (half) {
+        e.x1 -= (e.x1 - src.bounds.x1) & 1;
+        e.y1 -= (e.y1 - src.bounds.y1) & 1;
+        if (((e.x2 - e.x1) & 1) && e.x2 < src.bounds.x2) ++e.x2;
+        if (((e.y2 - e.y1) & 1) && e.y2 < src.bounds.y2) ++e.y2;
+    }
     int w = e.width(), h = e.height();
     size_t n = static_cast<size_t>(w) * h;
-    bool half = p.spatial_half != 0;
     int w2 = (w + 1) / 2, h2 = (h + 1) / 2;
     size_t nb = half ? static_cast<size_t>(w2) * h2 : n;
     Pool pool(stream);

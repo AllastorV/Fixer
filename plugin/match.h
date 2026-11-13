@@ -782,7 +782,8 @@ struct JsonReader {
 };
 
 inline bool parse_json(const std::string& text, Json& out) {
-    JsonReader r{text.c_str(), text.c_str() + text.size()};
+    size_t bom = text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0;
+    JsonReader r{text.c_str() + bom, text.c_str() + text.size()};
     if (!r.value(out, 0)) return false;
     r.ws();
     return r.p == r.e;

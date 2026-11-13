@@ -640,7 +640,8 @@ fe::RenderParams base_params(OfxImageEffectHandle effect, OfxTime t) {
     p.out_space = get_choice(effect, "outSpace", t);
     p.exposure_ev = static_cast<float>(get_double(effect, "exposure", t));
     p.push_pull = static_cast<float>(get_double(effect, "pushPull", t));
-    p.impact = static_cast<float>(get_double(effect, "impact", t));
+    double impact = get_double(effect, "impact", t);
+    p.impact = static_cast<float>(std::isfinite(impact) ? std::clamp(impact, 0.0, 1.0) : 1.0);
     double print_exp = get_double(effect, "printExposure", t);
     const char* lights[3] = {"printRed", "printGreen", "printBlue"};
     for (int c = 0; c < 3; ++c)
@@ -719,7 +720,8 @@ int resolve_profile(OfxImageEffectHandle effect, OfxTime t) {
 OfxStatus is_identity(OfxImageEffectHandle effect, OfxPropertySetHandle in, OfxPropertySetHandle out) {
     OfxTime t = 0;
     gProp->propGetDouble(in, kOfxPropTime, 0, &t);
-    if (get_double(effect, "impact", t) != 0.0) return kOfxStatReplyDefault;
+    double impact = get_double(effect, "impact", t);
+    if (!std::isfinite(impact) || impact > 0.0) return kOfxStatReplyDefault;
     gProp->propSetString(out, kOfxPropName, 0, kOfxImageEffectSimpleSourceClipName);
     return kOfxStatOK;
 }
@@ -972,7 +974,18 @@ struct DeviceScope {
 
 constexpr UINT kRefMaxSide = 30000, kRefScaled = 1024;
 
+bool image_complete(const std::wstring& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::string data((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    static const std::string png("\x89PNG\r\n\x1a\n", 8), iend("IEND\xAE\x42\x60\x82", 8);
+    if (data.compare(0, 8, png) == 0) return data.find(iend, 8) != std::string::npos;
+    if (data.compare(0, 2, "\xFF\xD8") == 0) return data.find("\xFF\xD9", 2) != std::string::npos;
+    return true;
+}
+
 int read_reference(const std::wstring& path, std::vector<uint8_t>& px, int& w, int& h) {
+    if (!image_complete(path)) return 1;
     HRESULT init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     IWICImagingFactory* factory = nullptr;
     IWICBitmapDecoder* decoder = nullptr;

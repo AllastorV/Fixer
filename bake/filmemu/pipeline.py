@@ -33,7 +33,8 @@ def _film(rgba, luts, params, quantize_weights, region):
     rgb = sanitize(rgba[ey1:ey2, ex1:ex2, :3]) if rgba.ndim == 3 else sanitize(rgba[..., :3])
     alpha = (rgba[ey1:ey2, ex1:ex2, 3:4] if rgba.ndim == 3 else rgba[..., 3:4]).astype(np.float64)
     if params.premultiplied:
-        rgb = np.where(alpha > 0, rgb / np.where(alpha > 0, alpha, 1.0), rgb)
+        ok = (alpha > 0) & np.isfinite(alpha)
+        rgb = np.where(ok, rgb / np.where(ok, alpha, 1.0), rgb)
     working = sanitize(to_working(rgb, params.in_space))
     lin = working * np.exp2(params.exposure_ev)
     if params.halation_amount > 0.0:
@@ -90,5 +91,5 @@ def render(rgba, luts, params, quantize_weights=False, window=None):
     ref = sanitize(from_working(working, params.out_space))
     out = ref + params.impact * (from_working(film, params.out_space) - ref)
     if params.premultiplied:
-        out = out * alpha
+        out = out * np.where(np.isfinite(alpha), alpha, np.where(alpha > 0, 1.0, 0.0))
     return np.concatenate([out, alpha], axis=-1).astype(np.float32)
