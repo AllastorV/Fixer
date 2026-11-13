@@ -2,11 +2,16 @@
 
 ![FIXER](docs/brand/fixer-banner-photo@2x.png)
 
+[![NVIDIA CUDA](https://img.shields.io/badge/NVIDIA-CUDA-76B900?logo=nvidia&logoColor=white)](#install)
+[![Download source ZIP](https://img.shields.io/badge/Source-ZIP-24292F?logo=github)](https://github.com/AllastorV/Fixer/archive/refs/tags/v1.1.0.zip)
+[![Download Windows x64 installer EXE](https://img.shields.io/badge/Download-Windows%20x64%20EXE-0078D4)](https://github.com/AllastorV/Fixer/releases/download/v1.1.0/FIXER-1.1.0-win64-cuda-setup.exe)
+[![Apache 2.0 license](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
+
 **Free, open-source film emulation and reference matching for DaVinci Resolve.**
 
 FIXER models 41 film stocks from manufacturers’ published technical data, including cinema negatives with print film, still negatives with photographic paper, and directly viewed slides.
 
-**Windows · NVIDIA CUDA · OpenFX**
+**Windows x64 · OpenFX**
 
 [Film emulation](#film-emulation) · [Film controls](#film-controls) · [Reference match](#reference-match) · [Install](#install) · [User guide](docs/USER-GUIDE.md)
 
@@ -50,9 +55,16 @@ Matching transfers tone, saturation and colour casts from the reference. **Simpl
 
 ## Install
 
-1. Close Resolve. Download the Windows CUDA setup EXE from [GitHub Releases](https://github.com/AllastorV/Fixer/releases/latest), run it, and accept the Windows administrator prompt. To install from the release ZIP or a local build, run `install.bat` instead.
-2. In Resolve, go to **Preferences → Memory and GPU** and set **GPU processing mode** to **CUDA**. Restart Resolve after installation or changing GPU mode.
-3. On the **Color** page, add **OpenFX → FIXER → FIXER** to the last node after your scene grade.
+### Windows installer (EXE)
+
+Requires 64-bit Windows, DaVinci Resolve and a CUDA-capable NVIDIA GPU. The installer includes the FIXER OpenFX plugin and its ready-to-use film profiles and LUTs.
+
+1. Close DaVinci Resolve.
+2. Download and run [FIXER v1.1.0 for Windows x64](https://github.com/AllastorV/Fixer/releases/download/v1.1.0/FIXER-1.1.0-win64-cuda-setup.exe). Accept the Windows administrator prompt and complete setup.
+3. Open Resolve, go to **Preferences → Memory and GPU**, and set **GPU processing mode** to **CUDA**. If you change the setting, restart Resolve.
+4. On the **Color** page, add **OpenFX → FIXER → FIXER** to the last node after your scene grade.
+
+For manual installation, extract the Windows CUDA ZIP from [GitHub Releases](https://github.com/AllastorV/Fixer/releases/latest) and run `install.bat` with Resolve closed. Then follow steps 3 and 4 above.
 
 For a standard DaVinci YRGB workflow, feed **DaVinci Wide Gamut / Intermediate** into FIXER and select **Rec.709 / Gamma 2.4** as its output. FIXER performs tone mapping, so disable additional output tone mapping in managed projects. See the [node setups](docs/USER-GUIDE.md#node-trees) for the exact settings.
 
@@ -60,7 +72,7 @@ For a standard DaVinci YRGB workflow, feed **DaVinci Wide Gamut / Intermediate**
 
 Use Visual Studio 2022 Build Tools with C++, CUDA 13.5, CMake 3.26 or later, Ninja, and Python 3.12 with `numpy`, `scipy` and `colour-science`.
 
-From the repository root, initialize the OpenFX submodule. Then run these commands in an **x64 Native Tools Command Prompt** with CUDA, Ninja and Python on `PATH`.
+Clone the repository with Git so you can initialize the OpenFX submodule. From the repository root, run these commands in an **x64 Native Tools Command Prompt** with CUDA, Ninja and Python on `PATH`.
 
 ```bat
 git submodule update --init --recursive
