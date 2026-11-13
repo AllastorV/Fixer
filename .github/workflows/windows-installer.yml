@@ -1,0 +1,72 @@
+name: Build Windows installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version of an existing release with a Windows CUDA ZIP
+        required: true
+        default: '1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Download and verify the released plugin
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:VERSION -cnotmatch '^\d+\.\d+\.\d+$') { throw 'Use a version such as 1.0.0.' }
+          $zip = "FIXER-$env:VERSION-win64-cuda.zip"
+          gh release download "v$env:VERSION" --pattern $zip --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Release download failed.' }
+          $release = gh release view "v$env:VERSION" --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Release metadata lookup failed.' }
+          $digest = ($release.assets | Where-Object name -ceq $zip).digest
+          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
+          if ($digest -ne "sha256:$hash") { throw 'Release ZIP checksum mismatch.' }
+          Expand-Archive -LiteralPath $zip -DestinationPath package
+
+      - name: Compile with Inno Setup
+        run: |
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          $package = (Resolve-Path -LiteralPath "package\FIXER-$env:VERSION").Path
+          & $compiler "/DVersion=$env:VERSION" "/DPackageDir=$package" "/O$PWD" installer\Fixer.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
+
+      - name: Verify installation and removal
+        run: |
+          $setup = (Resolve-Path -LiteralPath "FIXER-$env:VERSION-win64-cuda-setup.exe").Path
+          $installed = Join-Path $env:CommonProgramFiles 'OFX\Plugins\Fixer.ofx.bundle'
+          $package = (Resolve-Path -LiteralPath "package\FIXER-$env:VERSION\Fixer.ofx.bundle").Path
+          $process = Start-Process -FilePath $setup -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)." }
+
+          foreach ($file in Get-ChildItem -LiteralPath $package -File -Recurse) {
+            $relative = [IO.Path]::GetRelativePath($package, $file.FullName)
+            $actual = Get-FileHash -LiteralPath (Join-Path $installed $relative)
+            $expected = Get-FileHash -LiteralPath $file.FullName
+            if ($actual.Hash -ne $expected.Hash) { throw "Installed file differs: $relative" }
+          }
+
+          $uninstaller = Join-Path $installed 'unins000.exe'
+          $process = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
+          if ($process.ExitCode -ne 0 -or (Test-Path -LiteralPath (Join-Path $installed 'Contents'))) {
+            throw 'Uninstall failed to remove the plugin.'
+          }
+
+      - name: Attach the installer to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "v$env:VERSION" "FIXER-$env:VERSION-win64-cuda-setup.exe" --repo $env:GITHUB_REPOSITORY

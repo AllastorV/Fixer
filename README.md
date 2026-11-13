@@ -50,7 +50,7 @@ Matching transfers tone, saturation and colour casts from the reference. **Simpl
 
 ## Install
 
-1. Close Resolve. With a built `Fixer.ofx.bundle` available, run `install.bat` and accept the Windows administrator prompt. The installer copies the bundle to `C:\Program Files\Common Files\OFX\Plugins`.
+1. Close Resolve. Download the Windows CUDA setup EXE from [GitHub Releases](https://github.com/AllastorV/Fixer/releases/latest), run it, and accept the Windows administrator prompt. To install from the release ZIP or a local build, run `install.bat` instead.
 2. In Resolve, go to **Preferences → Memory and GPU** and set **GPU processing mode** to **CUDA**. Restart Resolve after installation or changing GPU mode.
 3. On the **Color** page, add **OpenFX → FIXER → FIXER** to the last node after your scene grade.
 
