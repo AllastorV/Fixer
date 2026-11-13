@@ -665,7 +665,7 @@ void cache_match(Instance* inst, const std::string& text, double s, double pr, O
     if (inst->match_ok) {
         double t0 = now_ms();
         inst->match_only = st.source == "only";
-        inst->match_lut = fxm::bake_lut(st, s, pr);
+        inst->match_lut = fxm::bake_lut(st, s, 0.0);
         char msg[96];
         std::snprintf(msg, sizeof msg, "FIXER timing: match LUT bake %.1f ms", now_ms() - t0);
         log_timing(effect, msg);
@@ -678,7 +678,7 @@ bool apply_match(OfxImageEffectHandle effect, Instance* inst, fe::LutSet& luts, 
     double pr = fxm::clip(get_double(effect, "matchProtectSkin", t), 0.0, 1.0);
     if (!(s > 0.0) || get_choice(effect, "matchShow", t) != 0) return true;
     std::string text = get_string(effect, "matchState", t);
-    if (text != inst->match_text || s != inst->match_s || pr != inst->match_p) cache_match(inst, text, s, pr, effect);
+    if (text != inst->match_text || s != inst->match_s) cache_match(inst, text, s, pr, effect);
     if (!inst->match_ok) return true;
     if (!inst->match_set || inst->match_set_gen != inst->match_gen) {
         double t0 = now_ms();
@@ -708,6 +708,7 @@ bool apply_match(OfxImageEffectHandle effect, Instance* inst, fe::LutSet& luts, 
     if (inst->match_only) p.reserved2[0] |= fe::LutSet::kFilmBypass;
     p.reserved = fxm::kLutSize;
     p.reserved2[0] |= fe::LutSet::kMatchOn;
+    p.match_protect = static_cast<float>(pr);
     return true;
 }
 

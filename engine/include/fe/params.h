@@ -25,7 +25,8 @@ struct RenderParams {
     float bloom_radius_px;
     float print_log_offset[3];
     int32_t spatial_half;
-    int32_t reserved2[2];
+    int32_t reserved2[1];
+    float match_protect;
 };
 
 static_assert(sizeof(RenderParams) == 96, "RenderParams ABI");

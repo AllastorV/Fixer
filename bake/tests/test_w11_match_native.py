@@ -177,7 +177,7 @@ class PluginMatch(unittest.TestCase):
                                                                     "--match-strength", "0.7", "--match-protect", "0.5"])
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         film = render(img, self.luts, Params(out_space="dwg_linear"))[..., :3]
-        err = rel(out[..., :3], lut.apply(match.bake_lut(self.state, 0.7, 0.5), film, tetrahedral=True))
+        err = rel(out[..., :3], match.apply_lut(match.bake_lut(self.state, 0.7, 0.0), film, 0.5))
         print(f"\n[measure] OFX match render vs Python: {err:.2e}")
         self.assertLess(err, 1e-4)
 

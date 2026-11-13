@@ -392,6 +392,14 @@ def refine(state, encoded, reference_encoded=None):
 
 
 
+def apply_lut(table, film, protect):
+    m = lut.apply(table, film, tetrahedral=True)
+    if not protect > 0.0:
+        return m
+    w = 1.0 - min(protect, 1.0) * skin(film)
+    return film + w[..., None] * (m - film)
+
+
 def bake_lut(state, strength, protect, size=33):
     return lut.bake(blended(state, strength, protect), size)
 

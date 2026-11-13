@@ -106,9 +106,35 @@ __device__ float3 film_eval(float3 lin, const RenderParams& p, const SlotSet& sl
     return make_float3(di_decode(v.x), di_decode(v.y), di_decode(v.z));
 }
 
+__device__ float skin_smooth(float e0, float e1, float x) {
+    float t = fminf(fmaxf((x - e0) / (e1 - e0), 0.0f), 1.0f);
+    return t * t * (3.0f - 2.0f * t);
+}
+
+__device__ float lab_f(float t) { return t > 0.008856451679f ? cbrtf(t) : 7.787037037f * t + 0.137931034f; }
+
+__device__ float skin_weight(float3 c) {
+    float r = 1.8986149f * c.x - 0.79217618f * c.y - 0.10643872f * c.z;
+    float g = -0.16894879f * c.x + 1.48897575f * c.y - 0.32002697f * c.z;
+    float b = -0.12153916f * c.x - 0.31567585f * c.y + 1.43721501f * c.z;
+    float fx = lab_f((0.41239080f * r + 0.35758434f * g + 0.18048079f * b) / 0.95045593f);
+    float fy = lab_f(0.21263901f * r + 0.71516868f * g + 0.07219232f * b);
+    float fz = lab_f((0.01933082f * r + 0.11919478f * g + 0.95053215f * b) / 1.08905775f);
+    float L = 116.0f * fy - 16.0f, A = 500.0f * (fx - fy), B = 200.0f * (fy - fz);
+    if (!(L >= 15.0f && L <= 95.0f)) return 0.0f;
+    float C = hypotf(A, B), h = atan2f(B, A) * 57.29577951f;
+    if (h < 0.0f) h += 360.0f;
+    return skin_smooth(10.0f, 20.0f, h) * (1.0f - skin_smooth(75.0f, 85.0f, h)) * skin_smooth(2.0f, 8.0f, C) *
+           (1.0f - skin_smooth(45.0f, 51.0f, C));
+}
+
 __device__ float3 film_stage(float3 lin, const RenderParams& p, const SlotSet& slots, const float4* n) {
     float3 film = (p.reserved2[0] & LutSet::kFilmBypass) ? lin : film_eval(lin, p, slots, n);
-    return slots.match_tex ? sample_match(slots.match_tex, film, slots.match_size) : film;
+    if (!slots.match_tex) return film;
+    float3 m = sample_match(slots.match_tex, film, slots.match_size);
+    if (!(p.match_protect > 0.0f)) return m;
+    float w = 1.0f - fminf(p.match_protect, 1.0f) * skin_weight(film);
+    return make_float3(film.x + w * (m.x - film.x), film.y + w * (m.y - film.y), film.z + w * (m.z - film.z));
 }
 
 __device__ __forceinline__ uint32_t hash32(uint32_t x) {

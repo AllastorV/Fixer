@@ -304,9 +304,32 @@ class HostileState(unittest.TestCase):
     def test_fitted_states_keep_grey_ramp_monotone(self):
         self.assertEqual(self.ramp_drops(range(6), (("1.0", "0.0"), ("0.3", "0.0"))), [])
 
-    @unittest.expectedFailure
-    def test_known_defect_protect_skin_bends_warm_highlights(self):
+    def test_protect_skin_keeps_warm_highlights_monotone(self):
         self.assertEqual(self.ramp_drops((0, 2, 4, 5), (("1.0", "1.0"),)), [])
+
+    def test_protect_skin_masks_skin_per_pixel_and_leaves_greys(self):
+        skin709 = np.array([[0.62, 0.40, 0.30], [0.45, 0.28, 0.20], [0.80, 0.58, 0.46]])
+        grey = np.array([[0.05, 0.05, 0.05], [0.18, 0.18, 0.18], [0.6, 0.6, 0.6]])
+        lin = np.concatenate([skin709, grey]) @ match.REC709_TO_DWG.T
+        img = np.ones((1, 6, 4), np.float32)
+        img[0, :, :3] = spaces.from_working(lin, "dwg_di")
+        st = dict(states()[1], source="only")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "s.json"
+            path.write_text(json.dumps(st), encoding="utf-8")
+            outs = {}
+            for p in ("0.0", "1.0"):
+                r, out, _ = run(img, tmp, out_space="dwg_linear",
+                                extra=["--match-state", str(path), "--match-strength", "1.0", "--match-protect", p, "--match-source", "1"])
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                outs[p] = out[0, :, :3].astype(np.float64)
+        w = match.skin(lin)
+        self.assertTrue((w[:3] > 0.9).all(), w)
+        moved = np.abs(outs["0.0"][:3] - lin[:3]).max(-1)
+        kept = np.abs(outs["1.0"][:3] - lin[:3]).max(-1) / np.maximum(lin[:3].max(-1), 1e-6)
+        self.assertTrue((moved > 0.01).all(), moved)
+        self.assertLess(float(kept.max()), 0.02 * (1.0 - w[:3].min()) + 1e-4)
+        np.testing.assert_allclose(outs["1.0"][3:], outs["0.0"][3:], rtol=1e-5, atol=1e-6)
 
     @unittest.expectedFailure
     def test_known_defect_parser_accepts_non_monotone_edge_states(self):
