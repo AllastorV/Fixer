@@ -16,17 +16,11 @@ FIXER models 41 film stocks from manufacturers’ published technical data, incl
 
 The same 1985 Ocean City scan shows how cinema negatives, still negatives, slides and black-and-white film respond to the painted panels and blue sky. The gallery adds **Ektar 100** and **Ektachrome E100** for a six-stock comparison.
 
-All demo photographs share a +0.75 EV display adjustment for viewing in the README.
+The film gallery and feature comparisons use a uniform +0.75 EV display adjustment.
 
 [![Six FIXER renders of the same frame in Vision3 250D, Portra 400, Ektar 100, Velvia 50, Ektachrome E100 and HP5 Plus](docs/readme/film-stocks.jpg)](docs/readme/film-stocks.jpg)
 
 ## Film controls
-
-### Exposure
-
-![Vision3 250D and 2383 print at minus one, zero and plus one stop of film exposure](docs/readme/exposure.jpg)
-
-Changing **Exposure** moves the frame through the selected stock’s response curve. These three renders hold the stock, print and other controls constant.
 
 ### Halation, bloom and grain
 
@@ -41,12 +35,12 @@ The grain comparison isolates **Grain → Amount** on Vision3 500T with 2383 pri
 | Controls | What you can do |
 | --- | --- |
 | **Stock and print** | Choose from cinema, colour negative, black-and-white and reversal profiles. Use **Lab scan look** for the scan-fitted variant or turn it off for the datasheet model. |
-| **Exposure and development** | Set exposure and push/pull in stops. Adjust print brightness and RGB balance with printer lights. |
+| **Development and print** | Set push/pull in stops. Adjust print brightness and RGB balance with printer lights. |
 | **Colour spaces** | Set input and output encoding for your Resolve workflow. The [user guide](docs/USER-GUIDE.md) covers DaVinci YRGB, Resolve Color Management and ACES. |
 
 ## Reference match
 
-[![A source scene and a separate reference photo, followed by actual FIXER outputs in Film + match and Match only](docs/readme/reference-match.jpg)](docs/readme/reference-match.jpg)
+[![Jordan Pond in Acadia, the Grand Prismatic Spring reference from Yellowstone, and the FIXER outputs in Film + match and Match only](docs/readme/reference-match.jpg)](docs/readme/reference-match.jpg)
 
 1. Open **Reference match** and choose a JPEG or PNG. FIXER reads it as sRGB.
 2. Set **Order** to **Film + match** to build on the selected stock, or **Match only** to bypass the film emulation.
@@ -94,4 +88,4 @@ Planned work includes OpenCL for AMD and Intel GPUs on Windows, Metal for macOS,
 
 FIXER is licensed under [Apache-2.0](LICENSE). Film names identify the stocks being emulated. See [NOTICE](NOTICE) for project attribution.
 
-The Library of Congress reports no known copyright restrictions on the archive photographs used here. See the [photo credits and render settings](docs/readme/CREDITS.md).
+The Library of Congress reports no known copyright restrictions on the archive photographs. The Acadia and Yellowstone photographs are public domain according to the U.S. National Park Service. See the [photo credits and render settings](docs/readme/CREDITS.md).
