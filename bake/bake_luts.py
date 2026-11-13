@@ -31,7 +31,8 @@ BW_NEGATIVES = (("ilford-fp4plus", "Ilford FP4 Plus"), ("ilford-hp5plus", "Ilfor
                 ("ilford-delta400", "Ilford Delta 400"), ("fuji-acros2-100", "Fuji Acros II"),
                 ("ilford-xp2super", "Ilford XP2 Super"), ("kodak-doublex", "Kodak Double-X 5222"), ("kodak-plusx", "Kodak Plus-X"),
                 ("kodak-trix400", "Kodak Tri-X 400"), ("kodak-tmax100", "Kodak T-Max 100"), ("kodak-tmax400", "Kodak T-Max 400"),
-                ("ilford-delta3200", "Ilford Delta 3200"), ("ilford-delta100", "Ilford Delta 100"), ("ilford-panfplus", "Ilford Pan F Plus"))
+                ("ilford-delta3200", "Ilford Delta 3200"), ("ilford-delta100", "Ilford Delta 100"), ("ilford-panfplus", "Ilford Pan F Plus"),
+                ("ilford-sfx200", "Ilford SFX 200"))
 BW_PAPER = "ilford-multigrade-iv-rc"
 REVERSALS = (("fuji-provia100f", "Fuji Provia 100F"), ("fuji-velvia50", "Fuji Velvia 50"), ("fuji-velvia100", "Fuji Velvia 100"),
              ("kodak-kodachrome64", "Kodak Kodachrome 64"), ("kodak-ektachrome-e100", "Kodak Ektachrome E100"))
