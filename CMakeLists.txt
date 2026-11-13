@@ -22,19 +22,31 @@ target_link_libraries(fe_engine PUBLIC CUDA::cudart_static)
 set_target_properties(fe_engine PROPERTIES POSITION_INDEPENDENT_CODE ON CUDA_RUNTIME_LIBRARY Static)
 
 set(BUNDLE_DIR ${CMAKE_BINARY_DIR}/Fixer.ofx.bundle)
-file(GLOB STOCK_DATA CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/bake/data/stocks/*.json)
-set(LUT_DIR ${CMAKE_BINARY_DIR}/luts)
-add_custom_command(
-  OUTPUT ${LUT_DIR}/profiles.stamp
-  COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/bake/bake_luts.py ${LUT_DIR}
-  WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/bake
-  DEPENDS ${CMAKE_SOURCE_DIR}/bake/bake_luts.py ${CMAKE_SOURCE_DIR}/bake/filmemu/film.py ${CMAKE_SOURCE_DIR}/bake/filmemu/lut.py
-          ${CMAKE_SOURCE_DIR}/bake/filmemu/spaces.py ${CMAKE_SOURCE_DIR}/bake/filmemu/spectral.py
-          ${CMAKE_SOURCE_DIR}/bake/filmemu/stocks.py ${CMAKE_SOURCE_DIR}/bake/filmemu/grain.py ${CMAKE_SOURCE_DIR}/bake/filmemu/bw.py ${CMAKE_SOURCE_DIR}/bake/filmemu/reversal.py ${STOCK_DATA}
-          ${CMAKE_SOURCE_DIR}/bake/data/jakob_nodes_65.npz)
+set(FIXER_PREBUILT_PROFILES "" CACHE PATH "Directory containing prebuilt film profiles")
+if(FIXER_PREBUILT_PROFILES)
+  file(GLOB PROFILE_MANIFESTS "${FIXER_PREBUILT_PROFILES}/*/profile.json")
+  if(NOT PROFILE_MANIFESTS)
+    message(FATAL_ERROR "No film profiles found in ${FIXER_PREBUILT_PROFILES}")
+  endif()
+  set(PROFILES_DIR "${FIXER_PREBUILT_PROFILES}")
+else()
+  file(GLOB STOCK_DATA CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/bake/data/stocks/*.json)
+  set(LUT_DIR ${CMAKE_BINARY_DIR}/luts)
+  add_custom_command(
+    OUTPUT ${LUT_DIR}/profiles.stamp
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/bake/bake_luts.py ${LUT_DIR}
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/bake
+    DEPENDS ${CMAKE_SOURCE_DIR}/bake/bake_luts.py ${CMAKE_SOURCE_DIR}/bake/filmemu/film.py ${CMAKE_SOURCE_DIR}/bake/filmemu/lut.py
+            ${CMAKE_SOURCE_DIR}/bake/filmemu/spaces.py ${CMAKE_SOURCE_DIR}/bake/filmemu/spectral.py
+            ${CMAKE_SOURCE_DIR}/bake/filmemu/stocks.py ${CMAKE_SOURCE_DIR}/bake/filmemu/grain.py ${CMAKE_SOURCE_DIR}/bake/filmemu/bw.py ${CMAKE_SOURCE_DIR}/bake/filmemu/reversal.py ${STOCK_DATA}
+            ${CMAKE_SOURCE_DIR}/bake/data/jakob_nodes_65.npz)
+  set(PROFILES_DIR ${LUT_DIR}/profiles)
+  set(PROFILES_STAMP ${LUT_DIR}/profiles.stamp)
+endif()
 add_custom_target(fe_luts ALL
-  COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${LUT_DIR}/profiles ${BUNDLE_DIR}/Contents/Resources/profiles
-  DEPENDS ${LUT_DIR}/profiles.stamp)
+  COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${PROFILES_DIR}" "${BUNDLE_DIR}/Contents/Resources/profiles"
+  DEPENDS ${PROFILES_STAMP}
+  VERBATIM)
 
 add_library(film_emulation_ofx SHARED plugin/ofx_plugin.cpp)
 target_include_directories(film_emulation_ofx PRIVATE external/openfx/include)

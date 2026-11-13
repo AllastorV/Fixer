@@ -24,9 +24,32 @@ jobs:
           persist-credentials: false
           submodules: true
 
-      - name: Set up CUDA and Python dependencies
+      - name: Fetch prebuilt film profiles from the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if ($env:VERSION -cnotmatch '^\d+\.\d+\.\d+$') { throw 'Use a version such as 1.0.0.' }
+          $release = gh release view "v$env:VERSION" --repo $env:GITHUB_REPOSITORY --json isDraft,targetCommitish,assets | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $release.isDraft -or $release.targetCommitish -ne $env:GITHUB_SHA) {
+            throw 'The draft release must target this workflow commit.'
+          }
+          $asset = $release.assets | Where-Object name -ceq 'fixer-film-profiles.zip'
+          $profilePath = 'release-input\profiles'
+          if (-not $asset) {
+            $asset = $release.assets | Where-Object name -ceq "FIXER-$env:VERSION-win64-cuda.zip"
+            $profilePath = "release-input\FIXER-$env:VERSION\Fixer.ofx.bundle\Contents\Resources\profiles"
+          }
+          if (-not $asset) { throw 'Attach fixer-film-profiles.zip with a top-level profiles directory to the draft release.' }
+          gh release download "v$env:VERSION" --pattern $asset.name --dir release-archive --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Profile download failed.' }
+          $archive = Join-Path 'release-archive' $asset.name
+          $hash = (Get-FileHash -LiteralPath $archive).Hash
+          if ($asset.digest -ne "sha256:$hash") { throw 'Profile ZIP checksum mismatch.' }
+          Expand-Archive -LiteralPath $archive -DestinationPath release-input
+          "FIXER_PROFILES=$((Resolve-Path -LiteralPath $profilePath).Path)" >> $env:GITHUB_ENV
+
+      - name: Set up CUDA and Python dependencies
+        run: |
           $base = 'https://developer.download.nvidia.com/compute/cuda/redist'
           $manifest = Invoke-RestMethod "$base/redistrib_13.5.0.json"
           $cuda = Join-Path $env:RUNNER_TEMP 'cuda-13.5'
@@ -47,14 +70,12 @@ jobs:
           Join-Path $cuda 'bin' >> $env:GITHUB_PATH
           py -3.12 -m pip install 'numpy==2.5.4' 'scipy==1.18.1' 'colour-science==0.4.7'
 
-      - name: Build the plugin and bake LUTs from source
+      - name: Compile the plugin and bundle the prebuilt profiles
         shell: cmd
-        env:
-          OPENBLAS_NUM_THREADS: '2'
         run: |
           call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
           for /f "delims=" %%i in ('py -3.12 -c "import sys; print(sys.executable)"') do set "PYTHON_EXE=%%i"
-          cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="%PYTHON_EXE%" -DCMAKE_CUDA_COMPILER="%CUDA_PATH%\bin\nvcc.exe" -DCUDAToolkit_ROOT="%CUDA_PATH%" || exit /b 1
+          cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="%PYTHON_EXE%" -DCMAKE_CUDA_COMPILER="%CUDA_PATH%\bin\nvcc.exe" -DCUDAToolkit_ROOT="%CUDA_PATH%" -DFIXER_PREBUILT_PROFILES="%FIXER_PROFILES%" || exit /b 1
           cmake --build build/release --target film_emulation_ofx
 
       - name: Stage the plugin and ZIP
@@ -86,6 +107,14 @@ jobs:
             if ($actual.Hash -ne $expected.Hash) { throw "Installed file differs: $relative" }
           }
 
+          $installedProfiles = Join-Path $installed 'Contents\Resources\profiles'
+          foreach ($file in Get-ChildItem -LiteralPath $env:FIXER_PROFILES -File -Recurse) {
+            $relative = [IO.Path]::GetRelativePath($env:FIXER_PROFILES, $file.FullName)
+            $actual = Get-FileHash -LiteralPath (Join-Path $installedProfiles $relative)
+            $expected = Get-FileHash -LiteralPath $file.FullName
+            if ($actual.Hash -ne $expected.Hash) { throw "Installed profile differs from the prebuilt file: $relative" }
+          }
+
           $uninstaller = Join-Path $installed 'unins000.exe'
           $process = Start-Process -FilePath $uninstaller -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
           if ($process.ExitCode -ne 0 -or (Test-Path -LiteralPath (Join-Path $installed 'Contents'))) {
@@ -96,4 +125,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "v$env:VERSION" "FIXER-$env:VERSION-win64-cuda-setup.exe" "FIXER-$env:VERSION-win64-cuda.zip" --target $env:GITHUB_SHA --title "FIXER $env:VERSION" --generate-notes --repo $env:GITHUB_REPOSITORY
+          $tag = "v$env:VERSION"
+          gh release upload $tag "FIXER-$env:VERSION-win64-cuda-setup.exe" "FIXER-$env:VERSION-win64-cuda.zip" --clobber --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }
+          if (Test-Path -LiteralPath 'release-archive\fixer-film-profiles.zip') {
+            gh release delete-asset $tag fixer-film-profiles.zip --yes --repo $env:GITHUB_REPOSITORY
+            if ($LASTEXITCODE -ne 0) { throw 'Could not remove the staging ZIP.' }
+          }
+          gh release edit $tag --draft=false --repo $env:GITHUB_REPOSITORY
