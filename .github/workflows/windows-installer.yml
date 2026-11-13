@@ -4,38 +4,65 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version of an existing release with a Windows CUDA ZIP
+        description: Version for the new release, without the v prefix
         required: true
-        default: '1.0.0'
 
-permissions:
-  contents: write
+concurrency:
+  group: windows-release-${{ inputs.version }}
 
 jobs:
   installer:
     runs-on: windows-2022
-    timeout-minutes: 20
+    timeout-minutes: 45
+    permissions:
+      contents: write
     env:
       VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
           persist-credentials: false
+          submodules: true
 
-      - name: Download and verify the released plugin
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Set up CUDA and Python dependencies
         run: |
           if ($env:VERSION -cnotmatch '^\d+\.\d+\.\d+$') { throw 'Use a version such as 1.0.0.' }
-          $zip = "FIXER-$env:VERSION-win64-cuda.zip"
-          gh release download "v$env:VERSION" --pattern $zip --repo $env:GITHUB_REPOSITORY
-          if ($LASTEXITCODE -ne 0) { throw 'Release download failed.' }
-          $release = gh release view "v$env:VERSION" --repo $env:GITHUB_REPOSITORY --json assets | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw 'Release metadata lookup failed.' }
-          $digest = ($release.assets | Where-Object name -ceq $zip).digest
-          $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash
-          if ($digest -ne "sha256:$hash") { throw 'Release ZIP checksum mismatch.' }
-          Expand-Archive -LiteralPath $zip -DestinationPath package
+          $base = 'https://developer.download.nvidia.com/compute/cuda/redist'
+          $manifest = Invoke-RestMethod "$base/redistrib_13.5.0.json"
+          $cuda = Join-Path $env:RUNNER_TEMP 'cuda-13.5'
+          New-Item -ItemType Directory -Path $cuda | Out-Null
+          foreach ($name in 'cuda_nvcc', 'cuda_crt', 'cuda_cudart', 'cccl', 'libnvvm') {
+            $component = $manifest.$name.'windows-x86_64'
+            $zip = Join-Path $env:RUNNER_TEMP "$name.zip"
+            $expanded = Join-Path $env:RUNNER_TEMP $name
+            curl.exe --fail --silent --show-error --location --retry 3 "$base/$($component.relative_path)" -o $zip
+            if ($LASTEXITCODE -ne 0 -or (Get-FileHash -LiteralPath $zip).Hash -ne $component.sha256) {
+              throw "CUDA download failed verification: $name"
+            }
+            Expand-Archive -LiteralPath $zip -DestinationPath $expanded
+            $root = Get-ChildItem -LiteralPath $expanded -Directory | Select-Object -First 1
+            Copy-Item -Path (Join-Path $root.FullName '*') -Destination $cuda -Recurse -Force
+          }
+          "CUDA_PATH=$cuda" >> $env:GITHUB_ENV
+          Join-Path $cuda 'bin' >> $env:GITHUB_PATH
+          py -3.12 -m pip install 'numpy==2.5.4' 'scipy==1.18.1' 'colour-science==0.4.7'
+
+      - name: Build the plugin and bake LUTs from source
+        shell: cmd
+        env:
+          OPENBLAS_NUM_THREADS: '2'
+        run: |
+          call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+          for /f "delims=" %%i in ('py -3.12 -c "import sys; print(sys.executable)"') do set "PYTHON_EXE=%%i"
+          cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="%PYTHON_EXE%" -DCMAKE_CUDA_COMPILER="%CUDA_PATH%\bin\nvcc.exe" -DCUDAToolkit_ROOT="%CUDA_PATH%" || exit /b 1
+          cmake --build build/release --target film_emulation_ofx
+
+      - name: Stage the plugin and ZIP
+        run: |
+          $package = New-Item -ItemType Directory -Path "package\FIXER-$env:VERSION"
+          Copy-Item -LiteralPath 'build\release\Fixer.ofx.bundle' -Destination $package.FullName -Recurse
+          Copy-Item -LiteralPath 'LICENSE', 'NOTICE', 'install.bat', 'docs\USER-GUIDE.md' -Destination $package.FullName
+          Compress-Archive -LiteralPath $package.FullName -DestinationPath "FIXER-$env:VERSION-win64-cuda.zip"
 
       - name: Compile with Inno Setup
         run: |
@@ -65,8 +92,8 @@ jobs:
             throw 'Uninstall failed to remove the plugin.'
           }
 
-      - name: Attach the installer to the release
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "v$env:VERSION" "FIXER-$env:VERSION-win64-cuda-setup.exe" --repo $env:GITHUB_REPOSITORY
+          gh release create "v$env:VERSION" "FIXER-$env:VERSION-win64-cuda-setup.exe" "FIXER-$env:VERSION-win64-cuda.zip" --target $env:GITHUB_SHA --title "FIXER $env:VERSION" --generate-notes --repo $env:GITHUB_REPOSITORY
