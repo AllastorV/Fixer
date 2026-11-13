@@ -1,42 +1,97 @@
 # FIXER
 
-![FIXER](docs/brand/fixer-banner-photo@2x.png)
+![FIXER film emulation for DaVinci Resolve](docs/readme/fixer-cover.jpg)
 
-FIXER is a free film emulation OFX plugin for DaVinci Resolve (Windows, NVIDIA CUDA). 36 film stocks with their print or paper, built from manufacturers' published technical data: Kodak Vision3, Portra, Ektar, Gold, UltraMax, Tri-X, T-Max, Double-X, Plus-X, Ektachrome, Kodachrome; Fujifilm Velvia, Provia, C200, Superia, Pro 400H, Eterna Vivid, Acros II; Ilford HP5, FP4, Delta, Pan F, XP2.
+**Free, open-source film emulation and reference matching for DaVinci Resolve.**
 
-User guide: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).
+FIXER models 41 film stocks from manufacturers’ published technical data, including cinema negatives with print film, still negatives with photographic paper, and directly viewed slides.
 
-## Build
+**Windows · NVIDIA CUDA · OpenFX**
 
-Requirements: VS 2022 Build Tools (C++), CUDA 13.5, CMake ≥ 3.26, Ninja, Python 3.12 with `numpy`, `scipy`, `colour-science`.
+[Film emulation](#film-emulation) · [Film controls](#film-controls) · [Reference match](#reference-match) · [Install](#install) · [User guide](docs/USER-GUIDE.md)
 
-```bat
-build.bat
-```
+## Film emulation
 
-Output: `build\release\Fixer.ofx.bundle` (plugin + baked LUTs in `Contents\Resources`).
+![A 1985 Ocean City amusement ride cycles through the source scan and FIXER renders of Vision3 250D, Portra 400, Velvia 50 and Ilford HP5 Plus](docs/readme/film-stocks.gif)
+
+The same 1985 Ocean City scan shows how cinema negatives, still negatives, slides and black-and-white film respond to the painted panels and blue sky. The gallery adds **Ektar 100** and **Ektachrome E100** for a six-stock comparison.
+
+All demo photographs share a +0.75 EV display adjustment for viewing in the README.
+
+[![Six FIXER renders of the same frame in Vision3 250D, Portra 400, Ektar 100, Velvia 50, Ektachrome E100 and HP5 Plus](docs/readme/film-stocks.jpg)](docs/readme/film-stocks.jpg)
+
+## Film controls
+
+### Exposure
+
+![Vision3 250D and 2383 print at minus one, zero and plus one stop of film exposure](docs/readme/exposure.jpg)
+
+Changing **Exposure** moves the frame through the selected stock’s response curve. These three renders hold the stock, print and other controls constant.
+
+### Halation, bloom and grain
+
+[![Identical crops of the Twi-Lite Cinema sign with glow off, halation only and bloom only](docs/readme/glow.jpg)](docs/readme/glow.jpg)
+
+The bright edges of the **Twi-Lite Cinema Center** sign (1987) show halation’s warm fringe and bloom’s softer highlight spread. **Glow → Fast** computes both at half resolution. **Full** uses full resolution.
+
+[![Enlarged crops of the same Twi-Lite Cinema lettering with grain off and on](docs/readme/grain.jpg)](docs/readme/grain.jpg)
+
+The grain comparison isolates **Grain → Amount** on Vision3 500T with 2383 print. **Size**, **Rate** and **Seed** control texture scale and how the pattern changes over time.
+
+| Controls | What you can do |
+| --- | --- |
+| **Stock and print** | Choose from cinema, colour negative, black-and-white and reversal profiles. Use **Lab scan look** for the scan-fitted variant or turn it off for the datasheet model. |
+| **Exposure and development** | Set exposure and push/pull in stops. Adjust print brightness and RGB balance with printer lights. |
+| **Colour spaces** | Set input and output encoding for your Resolve workflow. The [user guide](docs/USER-GUIDE.md) covers DaVinci YRGB, Resolve Color Management and ACES. |
+
+## Reference match
+
+[![A source scene and a separate reference photo, followed by actual FIXER outputs in Film + match and Match only](docs/readme/reference-match.jpg)](docs/readme/reference-match.jpg)
+
+1. Open **Reference match** and choose a JPEG or PNG. FIXER reads it as sRGB.
+2. Set **Order** to **Film + match** to build on the selected stock, or **Match only** to bypass the film emulation.
+3. Click **Create grade** on the frame you want to match. Adjust **Strength** and **Protect skin tones**, then use **Show → Before match** to compare.
+
+Matching transfers tone, saturation and colour casts from the reference. **Simple** is the current matching algorithm. **Detailed** currently uses the same algorithm. **Save look** stores a reusable `.json` and exports a `.cube` for **Match only** in Rec.709 Gamma 2.4.
 
 ## Install
 
-`install.bat` (asks for administrator) copies the bundle to `C:\Program Files\Common Files\OFX\Plugins`. Restart Resolve. Resolve must use CUDA as GPU processing mode.
+1. Close Resolve. With a built `Fixer.ofx.bundle` available, run `install.bat` and accept the Windows administrator prompt. The installer copies the bundle to `C:\Program Files\Common Files\OFX\Plugins`.
+2. In Resolve, go to **Preferences → Memory and GPU** and set **GPU processing mode** to **CUDA**. Restart Resolve after installation or changing GPU mode.
+3. On the **Color** page, add **OpenFX → FIXER → FIXER** to the last node after your scene grade.
 
-## Tests
+For a standard DaVinci YRGB workflow, feed **DaVinci Wide Gamut / Intermediate** into FIXER and select **Rec.709 / Gamma 2.4** as its output. FIXER performs tone mapping, so disable additional output tone mapping in managed projects. See the [node setups](docs/USER-GUIDE.md#node-trees) for the exact settings.
+
+## Build from source
+
+Use Visual Studio 2022 Build Tools with C++, CUDA 13.5, CMake 3.26 or later, Ninja, and Python 3.12 with `numpy`, `scipy` and `colour-science`.
+
+From the repository root, initialize the OpenFX submodule. Then run these commands in an **x64 Native Tools Command Prompt** with CUDA, Ninja and Python on `PATH`.
+
+```bat
+git submodule update --init --recursive
+python -m pip install numpy scipy colour-science
+cmake -S . -B build\release -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build\release
+```
+
+The build produces `build\release\Fixer.ofx.bundle` with the plugin and baked LUTs. The repository also includes `build.bat` for the original development machine’s tool paths.
+
+## Tests and roadmap
+
+From the repository root after building, run the Python, CUDA and OFX tests.
 
 ```bat
 cd bake
-py -3.12 -m unittest discover -s tests -p "test_*.py"
+python -m unittest discover -s tests -p "test_*.py"
 ```
 
-Tools in `bake/tools`: `resolve_check.py` / `resolve_run.py` (pixel match of Resolve renders against the Python reference, every stock), `resolve_params.py` (the same for exposure, push/pull, impact, glow, printer lights, colour spaces and grain), `mode_check.py` (each stock in datasheet, Lab scan and grey-balance modes with grain and halation), `scan_fit.py` (Lab scan fit).
+The [test tools](bake/tools) include Resolve render comparisons, stock and parameter checks, and Lab scan fitting. See the [numeric contract](docs/W01-numeric-contract.md) for tolerances.
 
-Numeric rules: [docs/W01-numeric-contract.md](docs/W01-numeric-contract.md).
+Planned work includes OpenCL for AMD and Intel GPUs on Windows, Metal for macOS, and more film stocks.
 
-## Roadmap
+## License and image credits
 
-- OpenCL support for AMD and Intel GPUs on Windows.
-- Metal support for macOS.
-- 14 more film stocks, 50 in total.
+FIXER is licensed under [Apache-2.0](LICENSE). Film names identify the stocks being emulated. See [NOTICE](NOTICE) for project attribution.
 
-## License
-
-Apache-2.0. Not affiliated with any film manufacturer or other film-emulation product; see `NOTICE`.
+The Library of Congress reports no known copyright restrictions on the archive photographs used here. See the [photo credits and render settings](docs/readme/CREDITS.md).
