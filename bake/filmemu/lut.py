@@ -36,8 +36,28 @@ def sample(lut, coords, quantize_weights=False):
     return c0 * (1 - fb) + c1 * fb
 
 
-def apply(lut, lin, quantize_weights=False):
-    return di_decode(sample(lut, di_encode(lin), quantize_weights))
+def sample_tetrahedral(lut, coords):
+    n = lut.shape[0]
+    position = np.clip(np.asarray(coords, np.float64), 0.0, 1.0) * (n - 1)
+    corner = np.minimum(np.floor(position).astype(np.int64), n - 2)
+    fraction = position - corner
+    order = np.argsort(-fraction, axis=-1, kind="stable")
+    previous = lut[corner[..., 2], corner[..., 1], corner[..., 0]].astype(np.float64)
+    result = previous.copy()
+    for i in range(3):
+        axis = order[..., i:i + 1]
+        corner += np.eye(3, dtype=np.int64)[axis[..., 0]]
+        following = lut[corner[..., 2], corner[..., 1], corner[..., 0]].astype(np.float64)
+        weight = np.take_along_axis(fraction, axis, axis=-1)
+        result += weight * (following - previous)
+        previous = following
+    return result
+
+
+def apply(lut, lin, quantize_weights=False, tetrahedral=False):
+    coords = di_encode(lin)
+    encoded = sample_tetrahedral(lut, coords) if tetrahedral else sample(lut, coords, quantize_weights)
+    return di_decode(encoded)
 
 
 def slot_weights(p):

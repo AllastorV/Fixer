@@ -49,7 +49,7 @@ def run_host(img, p, window, tmp, profile_id="synthetic-test", grain=None, spati
     args = [str(HOST), str(PLUGIN), str(tmp / "in.raw"), str(tmp / "out.raw"), str(w), str(h), str(SPACE_ID[p.in_space]),
             str(SPACE_ID[p.out_space]), str(p.exposure_ev), str(p.push_pull), str(p.impact), str(int(p.premultiplied)),
             *map(str, window), str(PROFILE_INDEX[profile_id]), *(map(str, grain) if grain else []), *(map(str, spatial) if spatial else []),
-            *(["--profile-id", stored_id] if stored_id else []), *(["--light", str(light)] if light else []), *(["--balance", str(balance)] if balance else [])]
+            *(["--profile-id", stored_id] if stored_id is not None else []), *(["--light", str(light)] if light else []), *(["--balance", str(balance)] if balance else [])]
     r = subprocess.run(args, capture_output=True, text=True)
     out = np.frombuffer((tmp / "out.raw").read_bytes(), np.float32).reshape(img.shape) if (tmp / "out.raw").exists() else None
     return r, out
@@ -83,7 +83,7 @@ class OfxAdapter(unittest.TestCase):
         log, err = self.check(Params(), (0, 0, 37, 23), 0)
         self.assertIn("plugin=com.alpcavas.fixer", log)
         self.assertIn("cuda_render_supported=true", log)
-        self.assertIn("params=27 clips=2", log)
+        self.assertIn("params=48 clips=2", log)
         self.assertIn("profile_id=synthetic-test", log)
         for pid, i in PROFILE_INDEX.items():
             self.assertIn(f"profile_option {i} {profile_label(pid)}", log)
@@ -187,6 +187,15 @@ class OfxAdapter(unittest.TestCase):
         self.assertIn(f"profile_choice_after_create={PROFILE_INDEX['synthetic-test']}", r.stdout)
         expect = render(img.reshape(-1, 4), self.luts, Params()).reshape(img.shape)
         self.assertLess(np.max(np.abs(out - expect) / np.maximum(1.0, np.abs(expect))), 2e-5)
+
+    def test_empty_stored_id_keeps_default_stock(self):
+        img = make_image("dwg_di", 9)
+        r, out = run_host(img, Params(), (0, 0, 37, 23), self.tmp.name, "synthetic-test", stored_id="")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"profile_choice_after_create={PROFILE_INDEX['kodak-vision3-250d-2383']}", r.stdout)
+        r2, ref = run_host(img, Params(), (0, 0, 37, 23), self.tmp.name, "synthetic-test", stored_id="kodak-vision3-250d-2383")
+        self.assertEqual(r2.returncode, 0, r2.stdout + r2.stderr)
+        self.assertEqual(out.tobytes(), ref.tobytes())
 
     def test_impact_zero_is_identity(self):
         img = make_image("dwg_di", 4)

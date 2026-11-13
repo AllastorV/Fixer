@@ -22,7 +22,10 @@ STILL_NEGATIVES = (("kodak-gold200", "Kodak Gold 200"), ("kodak-ultramax400", "K
                    ("fuji-c200", "Fuji C200"), ("kodak-ektar100", "Kodak Ektar 100"),
                    ("fuji-fujicolor100", "Fujicolor 100"), ("fuji-superia200", "Fuji Superia 200"),
                    ("fuji-superia1600", "Fuji Superia 1600"), ("fuji-pro400h", "Fuji Pro 400H"),
-                   ("kodak-portra160", "Kodak Portra 160"), ("kodak-portra400", "Kodak Portra 400"), ("kodak-portra800", "Kodak Portra 800"))
+                   ("kodak-portra160", "Kodak Portra 160"), ("kodak-portra400", "Kodak Portra 400"), ("kodak-portra800", "Kodak Portra 800"),
+                   ("kodak-portra160nc", "Kodak Portra 160NC"), ("kodak-portra160vc", "Kodak Portra 160VC"),
+                   ("kodak-proimage100", "Kodak Pro Image 100"), ("kodak-supra100", "Kodak Supra 100"),
+                   ("kodak-aerocolor4-125", "Kodak Aerocolor IV 125"))
 STILL_PAPER = "kodak-endura"
 BW_NEGATIVES = (("ilford-fp4plus", "Ilford FP4 Plus"), ("ilford-hp5plus", "Ilford HP5 Plus"),
                 ("ilford-delta400", "Ilford Delta 400"), ("fuji-acros2-100", "Fuji Acros II"),

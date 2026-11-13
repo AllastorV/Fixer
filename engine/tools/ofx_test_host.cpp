@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -18,6 +19,7 @@
 #include "ofxImageEffect.h"
 #include "ofxMessage.h"
 #include "ofxParam.h"
+#include "ofxProgress.h"
 #include "ofxProperty.h"
 
 namespace {
@@ -189,7 +191,7 @@ OfxStatus paramGetValueAtTime(OfxParamHandle h, OfxTime time, ...) {
     va_start(ap, time);
     Param* p = param_of(h);
     if (p->type == kOfxParamTypeDouble) *va_arg(ap, double*) = p->d;
-    else if (p->type == kOfxParamTypeString) *va_arg(ap, char**) = p->s.data();
+    else if ((p->type == kOfxParamTypeString || p->type == "OfxParamTypeButtonRow")) *va_arg(ap, char**) = p->s.data();
     else *va_arg(ap, int*) = p->i;
     va_end(ap);
     return kOfxStatOK;
@@ -200,7 +202,7 @@ OfxStatus paramSetValue(OfxParamHandle h, ...) {
     va_start(ap, h);
     Param* p = param_of(h);
     if (p->type == kOfxParamTypeDouble) p->d = va_arg(ap, double);
-    else if (p->type == kOfxParamTypeString) p->s = va_arg(ap, const char*);
+    else if ((p->type == kOfxParamTypeString || p->type == "OfxParamTypeButtonRow")) p->s = va_arg(ap, const char*);
     else p->i = va_arg(ap, int);
     va_end(ap);
     return kOfxStatOK;
@@ -222,8 +224,23 @@ OfxStatus param_handle(OfxParamSetHandle st, const char* name, OfxParamHandle* h
     return kOfxStatOK;
 }
 
+int gEditBegin = 0, gEditEnd = 0;
+std::string gEditLabels;
+
+OfxStatus edit_begin(OfxParamSetHandle, const char* name) {
+    ++gEditBegin;
+    gEditLabels += std::string(name ? name : "") + ";";
+    return kOfxStatOK;
+}
+OfxStatus edit_end(OfxParamSetHandle) {
+    ++gEditEnd;
+    return kOfxStatOK;
+}
+
 OfxParameterSuiteV1 make_param_suite() {
     OfxParameterSuiteV1 s{};
+    s.paramEditBegin = edit_begin;
+    s.paramEditEnd = edit_end;
     s.paramDefine = param_define;
     s.paramGetHandle = param_handle;
     s.paramGetValueAtTime = paramGetValueAtTime;
@@ -245,12 +262,47 @@ OfxStatus message(void*, const char* type, const char*, const char* fmt, ...) {
 
 OfxMessageSuiteV1 gMessage = {message};
 
+bool gOfferProgress = false;
+int gProgStarts = 0, gProgUpdates = 0, gProgEnds = 0;
+OfxStatus prog_start(void*, const char*) {
+    ++gProgStarts;
+    return kOfxStatOK;
+}
+OfxStatus prog_update(void*, double) {
+    ++gProgUpdates;
+    return kOfxStatOK;
+}
+OfxStatus prog_end(void*) {
+    ++gProgEnds;
+    return kOfxStatOK;
+}
+OfxProgressSuiteV1 gProgress = {prog_start, prog_update, prog_end};
+
+HHOOK gHook = nullptr;
+int gWindows = 0;
+ULONGLONG gWinStart = 0, gWinMs = 0;
+
+bool is_progress_window(HWND w) {
+    wchar_t cls[64] = {};
+    return GetClassNameW(w, cls, 64) && !std::wcscmp(cls, L"FIXERProgress");
+}
+
+LRESULT CALLBACK cbt(int code, WPARAM w, LPARAM l) {
+    if (code == HCBT_CREATEWND && is_progress_window(reinterpret_cast<HWND>(w))) {
+        ++gWindows;
+        gWinStart = GetTickCount64();
+    }
+    if (code == HCBT_DESTROYWND && is_progress_window(reinterpret_cast<HWND>(w))) gWinMs += GetTickCount64() - gWinStart;
+    return CallNextHookEx(gHook, code, w, l);
+}
+
 const void* fetchSuite(OfxPropertySetHandle, const char* name, int version) {
     if (version != 1) return nullptr;
     if (!std::strcmp(name, kOfxPropertySuite)) return &gProp;
     if (!std::strcmp(name, kOfxImageEffectSuite)) return &gEffect;
     if (!std::strcmp(name, kOfxParameterSuite)) return &gParam;
     if (!std::strcmp(name, kOfxMessageSuite)) return &gMessage;
+    if (gOfferProgress && !std::strcmp(name, kOfxProgressSuite)) return &gProgress;
     return nullptr;
 }
 
@@ -281,12 +333,47 @@ void set_image(Clip& c, void* data, int row_bytes, int w, int hgt, const char* p
 }
 
 int main(int argc, char** argv) {
+    int wargc = 0;
+    LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &wargc);
+    std::vector<std::string> args8;
+    std::vector<char*> argv8;
+    if (wargv && wargc == argc) {
+        for (int k = 0; k < wargc; ++k) {
+            int n = WideCharToMultiByte(CP_UTF8, 0, wargv[k], -1, nullptr, 0, nullptr, nullptr);
+            std::string a(n > 0 ? static_cast<size_t>(n) : 1, '\0');
+            if (n > 0) WideCharToMultiByte(CP_UTF8, 0, wargv[k], -1, a.data(), n, nullptr, nullptr);
+            a.resize(std::strlen(a.c_str()));
+            args8.push_back(a);
+        }
+        for (auto& a : args8) argv8.push_back(a.data());
+        argv8.push_back(nullptr);
+        argv = argv8.data();
+    }
+    if (wargv) LocalFree(wargv);
     const char* profile_id = nullptr;
+    const char *look_pick = nullptr, *create_device = nullptr, *press_button = nullptr;
+    bool check_buttons = false, check_rows = false;
     int light = 0, balance = 0;
+    const char *match_state = nullptr, *match_strength = nullptr, *match_protect = nullptr, *match_source = nullptr,
+               *match_show = nullptr, *match_create = nullptr, *look_save = nullptr, *look_load = nullptr;
     while (argc > 3 && argv[argc - 2][0] == '-' && argv[argc - 2][1] == '-') {
         if (!std::strcmp(argv[argc - 2], "--profile-id")) profile_id = argv[argc - 1];
         else if (!std::strcmp(argv[argc - 2], "--light")) light = std::atoi(argv[argc - 1]);
         else if (!std::strcmp(argv[argc - 2], "--balance")) balance = std::atoi(argv[argc - 1]);
+        else if (!std::strcmp(argv[argc - 2], "--match-state")) match_state = argv[argc - 1];
+        else if (!std::strcmp(argv[argc - 2], "--match-strength")) match_strength = argv[argc - 1];
+        else if (!std::strcmp(argv[argc - 2], "--match-protect")) match_protect = argv[argc - 1];
+        else if (!std::strcmp(argv[argc - 2], "--match-source")) match_source = argv[argc - 1];
+        else if (!std::strcmp(argv[argc - 2], "--match-show")) match_show = argv[argc - 1];
+        else if (!std::strcmp(argv[argc - 2], "--match-create")) match_create = argv[argc - 1];
+        else if (!std::strcmp(argv[argc - 2], "--look-save")) look_save = argv[argc - 1];
+        else if (!std::strcmp(argv[argc - 2], "--look-load")) look_load = argv[argc - 1];
+        else if (!std::strcmp(argv[argc - 2], "--look-pick")) look_pick = argv[argc - 1];
+        else if (!std::strcmp(argv[argc - 2], "--match-create-device")) create_device = argv[argc - 1];
+        else if (!std::strcmp(argv[argc - 2], "--press")) press_button = argv[argc - 1];
+        else if (!std::strcmp(argv[argc - 2], "--ui-rows")) check_rows = std::atoi(argv[argc - 1]) != 0;
+        else if (!std::strcmp(argv[argc - 2], "--ui-buttons")) check_buttons = std::atoi(argv[argc - 1]) != 0;
+        else if (!std::strcmp(argv[argc - 2], "--progress-suite")) gOfferProgress = std::atoi(argv[argc - 1]) != 0;
         else break;
         argc -= 2;
     }
@@ -304,6 +391,7 @@ int main(int argc, char** argv) {
     OfxPlugin* plug = get(0);
     std::printf("plugin=%s api=%s v%u.%u\n", plug->pluginIdentifier, plug->pluginApi, plug->pluginVersionMajor,
                 plug->pluginVersionMinor);
+    if (check_rows) setInt(h(gHostProps), "OfxParamHostPropSupportsButtonRowAnimation", 0, 0);
     plug->setHost(&gHost);
     Effect desc, inst;
     auto call = [&](const char* action, Effect& e, PropSet* in, PropSet* out) {
@@ -318,12 +406,15 @@ int main(int argc, char** argv) {
     std::printf("params=%zu clips=%zu\n", inst.params.size(), inst.clips.size());
     if (Value* opts = find(h(inst.params["profile"]->props), kOfxParamPropChoiceOption))
         for (size_t k = 0; k < opts->s.size(); ++k) std::printf("profile_option %zu %s\n", k, opts->s[k].c_str());
+    if (Value* opts = find(h(inst.params["lookSaved"]->props), kOfxParamPropChoiceOption))
+        for (size_t k = 0; k < opts->s.size(); ++k) std::printf("look_option %zu %s\n", k, opts->s[k].c_str());
     inst.params["profile"]->i = std::atoi(argv[16]);
     if (profile_id) inst.params["profileId"]->s = profile_id;
     if (call(kOfxActionCreateInstance, inst, nullptr, nullptr) != kOfxStatOK) return std::fprintf(stderr, "create failed\n"), 3;
     if (profile_id) {
         std::printf("profile_choice_after_create=%d\n", inst.params["profile"]->i);
     } else {
+        inst.params["profile"]->i = std::atoi(argv[16]);
         PropSet change;
         setString(h(change), kOfxPropType, 0, kOfxTypeParameter);
         setString(h(change), kOfxPropName, 0, "profile");
@@ -371,6 +462,131 @@ int main(int argc, char** argv) {
     cudaMemcpy2D(src, sp, img.data(), row, row, height, cudaMemcpyHostToDevice);
     cudaMemcpy2D(dst, dp, out_img.data(), row, row, height, cudaMemcpyHostToDevice);
     const char* premult = std::atoi(argv[11]) ? kOfxImagePreMultiplied : kOfxImageUnPreMultiplied;
+    auto param_changed = [&](const char* pname) {
+        PropSet change;
+        setString(h(change), kOfxPropType, 0, kOfxTypeParameter);
+        setString(h(change), kOfxPropName, 0, pname);
+        setString(h(change), kOfxPropChangeReason, 0, kOfxChangeUserEdited);
+        setDouble(h(change), kOfxPropTime, 0, time);
+        return call(kOfxActionInstanceChanged, inst, &change, nullptr);
+    };
+    if (check_rows) {
+        bool valid = true;
+        for (const char* name : {"glowQuality", "matchSource", "matchMode", "matchShow"}) {
+            const bool glow = !std::strcmp(name, "glowQuality");
+            const std::string row = std::string(name) + "Row";
+            auto found = inst.params.find(row);
+            if (found == inst.params.end()) return 4;
+            Param& ui = *found->second;
+            valid = valid && ui.type == "OfxParamTypeButtonRow";
+            char* label = nullptr;
+            getString(h(ui.props), kOfxPropLabel, 0, &label);
+            valid = valid && label && (glow ? std::string(label) == "Glow:" : std::string(label).back() == ':');
+            char* option = nullptr;
+            getString(h(ui.props), kOfxParamPropChoiceOption, 0, &option);
+            if (glow) valid = valid && option && std::string(option) == "Fast";
+            const auto* enums = find(h(ui.props), "OfxParamPropChoiceEnum");
+            const auto* icons = find(h(ui.props), "OfxParamPropChoiceIcon");
+            valid = valid && enums && enums->s.size() == 2 && icons && icons->s.size() == 16;
+            valid = valid && enums->s[0] == (glow ? "1" : "0") && enums->s[1] == (glow ? "0" : "1");
+            int previous = inst.params[name]->i;
+            valid = valid && ui.s == std::to_string(previous);
+            for (int selected : {0, 1, 0}) {
+                ui.s = enums->s[selected];
+                valid = valid && param_changed(row.c_str()) == kOfxStatOK;
+                valid = valid && inst.params[name]->i == (glow ? 1 - selected : selected);
+            }
+            // Saved original Choice values remain authoritative on restore/undo.
+            inst.params[name]->i = previous;
+            param_changed(name);
+            valid = valid && ui.s == std::to_string(previous);
+            for (int i = 0; i < 2; ++i) {
+                int secret = 0;
+                getInt(h(inst.params[std::string(name) + "Option" + std::to_string(i)]->props), kOfxParamPropSecret, 0, &secret);
+                valid = valid && secret == 1;
+            }
+        }
+        std::printf("mode_rows_valid=%d\n", valid ? 1 : 0);
+        if (!valid) return 4;
+    }
+    if (check_buttons) {
+        bool valid = true;
+        for (const char* name : {"glowQuality", "matchSource", "matchMode", "matchShow"}) {
+            int secret = 0, previous = inst.params[name]->i;
+            getInt(h(inst.params[name]->props), kOfxParamPropSecret, 0, &secret);
+            valid = valid && secret == 1 && inst.params[name]->type == kOfxParamTypeChoice;
+            for (int selected : {1, 0, 1}) {
+                std::string id = std::string(name) + "Option" + std::to_string(selected);
+                auto button = inst.params.find(id);
+                valid = valid && button != inst.params.end() && button->second->type == kOfxParamTypePushButton;
+                valid = valid && param_changed(id.c_str()) == kOfxStatOK && inst.params[name]->i == selected;
+                for (int i = 0; i < 2; ++i) {
+                    std::string other = std::string(name) + "Option" + std::to_string(i);
+                    char* label = nullptr;
+                    getString(h(inst.params[other]->props), kOfxPropLabel, 0, &label);
+                    bool marked = label && std::string(label).find("\xE2\x97\x8F ") == 0;
+                    valid = valid && marked == (i == selected);
+                }
+            }
+            // Simulate restoring a saved value / undo without clicking a button.
+            inst.params[name]->i = previous;
+            param_changed(name);
+            char* label = nullptr;
+            getString(h(inst.params[std::string(name) + "Option" + std::to_string(previous)]->props), kOfxPropLabel, 0, &label);
+            valid = valid && label && std::string(label).find("\xE2\x97\x8F ") == 0;
+        }
+        for (const char* name : {"inSpace", "outSpace", "grainRate", "profile", "lookSaved"}) {
+            int secret = 0;
+            getInt(h(inst.params[name]->props), kOfxParamPropSecret, 0, &secret);
+            valid = valid && !secret && inst.params[name]->type == kOfxParamTypeChoice;
+        }
+        std::printf("mode_buttons_valid=%d\n", valid ? 1 : 0);
+        if (!valid) return 4;
+    }
+    if (press_button) {
+        auto button = inst.params.find(press_button);
+        if (button == inst.params.end() || button->second->type != kOfxParamTypePushButton || param_changed(press_button) != kOfxStatOK) return 4;
+    }
+    if (match_strength) inst.params["matchStrength"]->d = std::atof(match_strength);
+    if (match_protect) inst.params["matchProtectSkin"]->d = std::atof(match_protect);
+    if (match_source) inst.params["matchSource"]->i = std::atoi(match_source);
+    if (match_show) inst.params["matchShow"]->i = std::atoi(match_show);
+    if (match_state) {
+        std::vector<char> text;
+        if (!read_file(match_state, text)) return std::fprintf(stderr, "bad match state\n"), 1;
+        inst.params["matchState"]->s.assign(text.begin(), text.end());
+    }
+    gHook = SetWindowsHookExW(WH_CBT, cbt, nullptr, GetCurrentThreadId());
+    if (look_load) {
+        inst.params["lookLoad"]->s = look_load;
+        std::printf("look_load_status=%d\n", param_changed("lookLoad"));
+    }
+    if (look_pick) {
+        inst.params["lookSaved"]->i = std::atoi(look_pick);
+        std::printf("look_pick_status=%d\n", param_changed("lookSaved"));
+    }
+    if (match_create) {
+        inst.params["matchFile"]->s = match_create;
+        if (create_device && std::atoi(create_device))
+            set_image(*inst.clips[kOfxImageEffectSimpleSourceClipName], src, static_cast<int>(sp), width, height, premult);
+        else
+            set_image(*inst.clips[kOfxImageEffectSimpleSourceClipName], img.data(), static_cast<int>(row), width, height, premult);
+        std::printf("match_create_status=%d\n", param_changed("matchCreate"));
+    }
+    if (look_save) {
+        inst.params["lookName"]->s = look_save;
+        std::printf("look_save_status=%d\n", param_changed("lookSave"));
+    }
+    if (gHook) UnhookWindowsHookEx(gHook);
+    if (gProgStarts)
+        std::printf("progress_path=host_suite starts=%d updates=%d ends=%d\n", gProgStarts, gProgUpdates, gProgEnds);
+    else if (gWindows)
+        std::printf("progress_path=own_window windows=%d shown_ms=%llu\n", gWindows, gWinMs);
+    else if (match_create || look_save)
+        std::printf("progress_path=none\n");
+    if (gEditBegin || gEditEnd) std::printf("param_edit begin=%d end=%d labels=%s\n", gEditBegin, gEditEnd, gEditLabels.c_str());
+    if (match_state || look_load || match_create || look_save || look_pick)
+        std::printf("match_source=%d\nmatch_state=%s\n", inst.params["matchSource"]->i, inst.params["matchState"]->s.c_str());
     set_image(*inst.clips[kOfxImageEffectSimpleSourceClipName], src, static_cast<int>(sp), width, height, premult);
     set_image(*inst.clips[kOfxImageEffectOutputClipName], dst, static_cast<int>(dp), width, height, premult);
     cudaStream_t stream;

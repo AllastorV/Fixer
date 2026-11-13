@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "fe/engine.h"
+#include "../../plugin/match.h"
 
 namespace {
 
@@ -23,11 +24,25 @@ int fail(const char* what, cudaError_t e) {
 
 }
 
+int match_bake(int argc, char** argv) {
+    std::vector<char> text;
+    fxm::State st;
+    if (argc != 6 && argc != 7) return std::fprintf(stderr, "usage: fe_cli --match-bake state.json strength protect out.bin [size]\n"), 1;
+    if (!read_file(argv[2], text) || !fxm::parse_state(std::string(text.begin(), text.end()), st))
+        return std::fprintf(stderr, "bad state\n"), 1;
+    int n = argc == 7 ? std::atoi(argv[6]) : fxm::kLutSize;
+    if (n < 2 || n > 129) return std::fprintf(stderr, "bad size\n"), 1;
+    std::vector<float> lut = fxm::bake_lut(st, std::strtod(argv[3], nullptr), std::strtod(argv[4], nullptr), n);
+    std::ofstream(argv[5], std::ios::binary).write(reinterpret_cast<const char*>(lut.data()), lut.size() * sizeof(float));
+    return 0;
+}
+
 int main(int argc, char** argv) {
+    if (argc > 1 && !std::strcmp(argv[1], "--match-bake")) return match_bake(argc, argv);
     if (argc < 10) {
         std::fprintf(stderr,
                      "usage: fe_cli params.bin in.raw out.raw width height lut_size under.bin normal.bin over.bin "
-                     "[--window x1 y1 x2 y2] [--print print.bin lo hi] [--grain grain.bin] [--iters N]\n");
+                     "[--window x1 y1 x2 y2] [--print print.bin lo hi] [--grain grain.bin] [--match match.bin size] [--iters N]\n");
         return 1;
     }
     bool has_window = false;
@@ -36,6 +51,8 @@ int main(int argc, char** argv) {
     float print_lo = 0.0f, print_hi = 0.0f;
     const char* grain_path = nullptr;
     bool grain_mono = false;
+    const char* match_path = nullptr;
+    int match_n = 0;
     for (int i = 10; i < argc; ++i) {
         if (!std::strcmp(argv[i], "--window") && i + 4 < argc) {
             for (int k = 0; k < 4; ++k) window[k] = std::atoi(argv[++i]);
@@ -46,6 +63,9 @@ int main(int argc, char** argv) {
             print_hi = std::strtof(argv[++i], nullptr);
         } else if (!std::strcmp(argv[i], "--grain") && i + 1 < argc) {
             grain_path = argv[++i];
+        } else if (!std::strcmp(argv[i], "--match") && i + 2 < argc) {
+            match_path = argv[++i];
+            match_n = std::atoi(argv[++i]);
         } else if (!std::strcmp(argv[i], "--grain-mono")) {
             grain_mono = true;
         } else if (!std::strcmp(argv[i], "--iters") && i + 1 < argc) {
@@ -84,6 +104,13 @@ int main(int argc, char** argv) {
         luts.set_grain_table(reinterpret_cast<const float*>(g.data()));
     }
     luts.set_grain_mono(grain_mono);
+    if (match_path) {
+        std::vector<char> lut;
+        if (match_n < 2 || !read_file(match_path, lut) || lut.size() != static_cast<size_t>(match_n) * match_n * match_n * 3 * sizeof(float))
+            return std::fprintf(stderr, "bad match lut\n"), 1;
+        cudaError_t e = luts.upload(fe::LutSet::kMatchSlot, reinterpret_cast<const float*>(lut.data()), match_n);
+        if (e != cudaSuccess) return fail("upload", e);
+    }
     float *src = nullptr, *dst = nullptr;
     size_t sp = 0, dp = 0, row = width * 4 * sizeof(float);
     cudaError_t e;

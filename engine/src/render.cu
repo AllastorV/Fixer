@@ -21,6 +21,8 @@ struct SlotSet {
     float print_inv;
     float grain[3 * kGrainTableSize];
     int grain_mono;
+    cudaTextureObject_t match_tex;
+    int match_size;
 };
 
 __device__ __forceinline__ float4 texel(cudaTextureObject_t tex, int r, int g, int b) {
@@ -43,6 +45,35 @@ __device__ float3 sample_raw(cudaTextureObject_t tex, float3 c, int n) {
                       lerp4(texel(tex, r, g + 1, b + 1), texel(tex, r + 1, g + 1, b + 1), fr), fg);
     float4 v = lerp4(c0, c1, fb);
     return make_float3(v.x, v.y, v.z);
+}
+
+// Tetrahedral interpolation follows the neutral diagonal without off-axis colour samples.
+__device__ float3 sample_match(cudaTextureObject_t tex, float3 lin, int n) {
+    float encoded[3] = {di_encode(lin.x), di_encode(lin.y), di_encode(lin.z)};
+    int corner[3], order[3] = {0, 1, 2};
+    float fraction[3];
+    for (int c = 0; c < 3; ++c) {
+        float position = fminf(fmaxf(encoded[c], 0.0f), 1.0f) * (n - 1);
+        corner[c] = min(static_cast<int>(position), n - 2);
+        fraction[c] = position - corner[c];
+    }
+    for (int i = 0; i < 2; ++i)
+        for (int j = i + 1; j < 3; ++j)
+            if (fraction[order[j]] > fraction[order[i]]) {
+                int swap = order[i]; order[i] = order[j]; order[j] = swap;
+            }
+    float4 previous = texel(tex, corner[0], corner[1], corner[2]);
+    float3 result = make_float3(previous.x, previous.y, previous.z);
+    for (int i = 0; i < 3; ++i) {
+        ++corner[order[i]];
+        float4 next = texel(tex, corner[0], corner[1], corner[2]);
+        float weight = fraction[order[i]];
+        result.x += weight * (next.x - previous.x);
+        result.y += weight * (next.y - previous.y);
+        result.z += weight * (next.z - previous.z);
+        previous = next;
+    }
+    return make_float3(di_decode(result.x), di_decode(result.y), di_decode(result.z));
 }
 
 __device__ float3 sample_slot(cudaTextureObject_t tex, float3 lin, int n) {
@@ -73,6 +104,11 @@ __device__ float3 film_eval(float3 lin, const RenderParams& p, const SlotSet& sl
                            (acc.z + p.print_log_offset[2] - slots.print_lo) * slots.print_inv);
     float3 v = sample_raw(slots.print_tex, q, p.lut_size);
     return make_float3(di_decode(v.x), di_decode(v.y), di_decode(v.z));
+}
+
+__device__ float3 film_stage(float3 lin, const RenderParams& p, const SlotSet& slots, const float4* n) {
+    float3 film = (p.reserved2[0] & LutSet::kFilmBypass) ? lin : film_eval(lin, p, slots, n);
+    return slots.match_tex ? sample_match(slots.match_tex, film, slots.match_size) : film;
 }
 
 __device__ __forceinline__ uint32_t hash32(uint32_t x) {
@@ -158,7 +194,7 @@ __global__ void film_kernel(const char* src, size_t src_pitch, char* dst, size_t
     float3 lin = make_float3(w.x * g, w.y * g, w.z * g);
     float4 nz;
     if (p.grain_amount > 0.0f) nz = grain_noise(p, p.origin_x + x, p.origin_y + y, slots.grain_mono);
-    float3 film = film_eval(lin, p, slots, p.grain_amount > 0.0f ? &nz : nullptr);
+    float3 film = film_stage(lin, p, slots, p.grain_amount > 0.0f ? &nz : nullptr);
     float3 fo = mul(slots.from_working, film);
     fo = make_float3(encode(p.out_space, fo.x), encode(p.out_space, fo.y), encode(p.out_space, fo.z));
     float4 out = make_float4(ref.x + p.impact * (fo.x - ref.x), ref.y + p.impact * (fo.y - ref.y),
@@ -223,6 +259,8 @@ SlotSet make_slots(const RenderParams& p, const LutSet& luts) {
         slots.from_working[i] = kFromWorking[p.out_space][i];
     }
     slots.grain_mono = luts.grain_mono() ? 1 : 0;
+    slots.match_tex = (p.reserved2[0] & LutSet::kMatchOn) ? luts.texture(LutSet::kMatchSlot) : 0;
+    slots.match_size = p.reserved;
     if (const float* t = luts.grain_table()) {
         for (int i = 0; i < 3 * kGrainTableSize; ++i) slots.grain[i] = t[i];
     } else {
@@ -348,7 +386,7 @@ __global__ void region_film(float4* lin, int ox, int oy, int w, int h, RenderPar
     float3 l = make_float3(v.x, v.y, v.z);
     float4 nz;
     if (p.grain_amount > 0.0f) nz = grain_noise(p, ox + x, oy + y, slots.grain_mono);
-    float3 film = film_eval(l, p, slots, p.grain_amount > 0.0f ? &nz : nullptr);
+    float3 film = film_stage(l, p, slots, p.grain_amount > 0.0f ? &nz : nullptr);
     lin[y * w + x] = make_float4(film.x, film.y, film.z, 0.0f);
 }
 
@@ -371,6 +409,10 @@ __global__ void region_final(Image src, Rect e, Rect win, const float4* film, ch
     reinterpret_cast<float4*>(dst + static_cast<ptrdiff_t>(gy - dst_bounds.y1) * dst_pitch)[gx - dst_bounds.x1] = out;
 }
 
+bool match_bad(const RenderParams& p, const LutSet& luts) {
+    return (p.reserved2[0] & LutSet::kMatchOn) && (!luts.texture(LutSet::kMatchSlot) || p.reserved < 2 || p.reserved != luts.match_size());
+}
+
 int blur_margin(float sigma) { return static_cast<int>(ceilf(3.0f * fminf(fmaxf(sigma, 0.5f), kSpatialMaxSigmaPx))); }
 
 cudaError_t blur(Pool& pool, const float4* in, float4* out, float4* tmp, int w, int h, float sigma) {
@@ -389,7 +431,8 @@ cudaError_t blur(Pool& pool, const float4* in, float4* out, float4* tmp, int w, 
 }
 
 LutSet::~LutSet() {
-    for (int i = 0; i < 4; ++i) {
+    if (match_borrowed_) tex_[kMatchSlot] = 0;
+    for (int i = 0; i < 5; ++i) {
         if (tex_[i]) cudaDestroyTextureObject(tex_[i]);
         if (arr_[i]) cudaFreeArray(arr_[i]);
     }
@@ -398,12 +441,14 @@ LutSet::~LutSet() {
 bool LutSet::ready() const { return size_ > 1 && tex_[0] && tex_[1] && tex_[2]; }
 
 cudaError_t LutSet::upload(int slot, const float* rgb, int size) {
-    if (slot < 0 || slot > kPrintSlot || size < 2 || (size_ && size_ != size)) return cudaErrorInvalidValue;
+    if (slot < 0 || slot > kMatchSlot || size < 2 || (slot != kMatchSlot && size_ && size_ != size)) return cudaErrorInvalidValue;
     size_t count = static_cast<size_t>(size) * size * size;
     std::vector<float4> rgba(count);
     for (size_t i = 0; i < count; ++i) rgba[i] = make_float4(rgb[3 * i], rgb[3 * i + 1], rgb[3 * i + 2], 0.0f);
+    if (slot == kMatchSlot && match_borrowed_) tex_[slot] = 0, match_borrowed_ = false;
     if (tex_[slot]) cudaDestroyTextureObject(tex_[slot]), tex_[slot] = 0;
     if (arr_[slot]) cudaFreeArray(arr_[slot]), arr_[slot] = nullptr;
+    if (slot == kMatchSlot) match_size_ = 0;
     cudaChannelFormatDesc fmt = cudaCreateChannelDesc<float4>();
     cudaExtent ext = make_cudaExtent(size, size, size);
     cudaError_t e = cudaMalloc3DArray(&arr_[slot], &fmt, ext);
@@ -423,7 +468,7 @@ cudaError_t LutSet::upload(int slot, const float* rgb, int size) {
     td.readMode = cudaReadModeElementType;
     td.normalizedCoords = 0;
     if ((e = cudaCreateTextureObject(&tex_[slot], &res, &td, nullptr)) != cudaSuccess) return e;
-    size_ = size;
+    (slot == kMatchSlot ? match_size_ : size_) = size;
     return cudaSuccess;
 }
 
@@ -436,6 +481,7 @@ cudaError_t render(const float* src, size_t src_pitch, float* dst, size_t dst_pi
         return cudaMemcpy2DAsync(dst, dst_pitch, src, src_pitch, width * sizeof(float4), height,
                                  cudaMemcpyDeviceToDevice, stream);
     if (!luts.ready()) return cudaErrorNotReady;
+    if (match_bad(params, luts)) return cudaErrorInvalidValue;
     RenderParams p = params;
     p.lut_size = luts.size();
     SlotSet slots = make_slots(p, luts);
@@ -466,6 +512,7 @@ cudaError_t render_region(Image src, float* dst_base, size_t dst_pitch, Rect dst
     if (params.in_space < 0 || params.in_space >= kSpaceCount || params.out_space < 0 || params.out_space >= kSpaceCount)
         return cudaErrorInvalidValue;
     if (!luts.ready()) return cudaErrorNotReady;
+    if (match_bad(params, luts)) return cudaErrorInvalidValue;
     RenderParams p = params;
     p.lut_size = luts.size();
     SlotSet slots = make_slots(p, luts);

@@ -27,12 +27,22 @@ public:
     LutSet& operator=(const LutSet&) = delete;
 
     static constexpr int kPrintSlot = 3;
+    static constexpr int kMatchSlot = 4;
+    static constexpr int kMatchOn = 1;
+    static constexpr int kFilmBypass = 2;
     cudaError_t upload(int slot, const float* rgb, int size);
+    void borrow_match(const LutSet& from) {
+        if (!match_borrowed_ && arr_[kMatchSlot]) return;
+        tex_[kMatchSlot] = from.tex_[kMatchSlot];
+        match_size_ = from.match_size_;
+        match_borrowed_ = true;
+    }
     void set_print_domain(float lo, float hi) { print_lo_ = lo, print_hi_ = hi; }
     bool ready() const;
     bool two_stage() const { return tex_[kPrintSlot] != 0 && print_hi_ > print_lo_; }
     cudaTextureObject_t texture(int slot) const { return tex_[slot]; }
     int size() const { return size_; }
+    int match_size() const { return match_size_; }
     float print_lo() const { return print_lo_; }
     float print_hi() const { return print_hi_; }
     void set_grain_table(const float* rgb) {
@@ -47,9 +57,11 @@ private:
     float grain_[3 * kGrainTableSize] = {};
     bool has_grain_ = false;
     bool grain_mono_ = false;
-    cudaArray_t arr_[4] = {};
-    cudaTextureObject_t tex_[4] = {};
+    cudaArray_t arr_[5] = {};
+    cudaTextureObject_t tex_[5] = {};
     int size_ = 0;
+    int match_size_ = 0;
+    bool match_borrowed_ = false;
     float print_lo_ = 0.0f, print_hi_ = 0.0f;
 };
 

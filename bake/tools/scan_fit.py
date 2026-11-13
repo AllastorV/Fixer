@@ -90,20 +90,24 @@ def fit(lin_list, target):
     return r.x, model_stats(lin_list, r.x)
 
 
-def main(stats_json, profiles_root, hdri_dir, out_json):
+def main(stats_json, profiles_root, hdri_dir, out_json, extra_json=None):
     lomo = json.loads(pathlib.Path(stats_json).read_text(encoding="utf-8"))["films"]
+    extra = json.loads(pathlib.Path(extra_json).read_text(encoding="utf-8"))["films"] if extra_json else {}
+    ref = list(lomo)
+    lomo = {**lomo, **extra}
     root = pathlib.Path(profiles_root)
     scene_list = scenes(hdri_dir)
     dirs = {neg: next(p for p in sorted(root.iterdir()) if p.name == neg or p.name.startswith(neg + "-")) for neg in lomo}
     lin = {neg: display_linear(d, scene_list) for neg, d in dirs.items()}
     base = {neg: model_stats(lin[neg], None) for neg in lomo}
     groups = {"bw": [n for n in lomo if stocks.is_bw(n)], "colour": [n for n in lomo if not stocks.is_bw(n)]}
+    refs = {g: [n for n in m if n in ref] for g, m in groups.items()}
     result = {}
     for gname, members in groups.items():
         usable = lambda n, k: k not in lomo[n].get("unreliable", ())
-        lmean = {k: np.mean([lomo[n][k] for n in members if usable(n, k)]) for k in KEYS}
-        bmean = {k: np.mean([base[n][k] for n in members if usable(n, k)]) for k in KEYS}
-        for n in members:
+        lmean = {k: np.mean([lomo[n][k] for n in refs[gname] if usable(n, k)]) for k in KEYS}
+        bmean = {k: np.mean([base[n][k] for n in refs[gname] if usable(n, k)]) for k in KEYS}
+        for n in (m for m in members if not extra or m in extra):
             if gname == "bw":
                 target = {k: lomo[n][k] for k in KEYS if k not in ("chroma", "spread")}
                 target["spread"] = bmean["spread"] + SHRINK * (lomo[n]["spread"] - lmean["spread"])
@@ -119,6 +123,6 @@ def main(stats_json, profiles_root, hdri_dir, out_json):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 5:
-        sys.exit("usage: scan_fit.py LOMO_STATS.json PROFILES_DIR HDRI_NPY_DIR OUT.json")
+    if len(sys.argv) not in (5, 6):
+        sys.exit("usage: scan_fit.py LOMO_STATS.json PROFILES_DIR HDRI_NPY_DIR OUT.json [NEW_STOCKS_STATS.json]")
     main(*sys.argv[1:])
