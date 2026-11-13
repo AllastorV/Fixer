@@ -1,6 +1,6 @@
 # FIXER
 
-![FIXER film emulation for DaVinci Resolve](docs/readme/fixer-cover.jpg)
+![FIXER](docs/brand/fixer-banner-photo@2x.png)
 
 **Free, open-source film emulation and reference matching for DaVinci Resolve.**
 
