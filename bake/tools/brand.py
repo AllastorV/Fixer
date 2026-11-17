@@ -10,6 +10,7 @@ WHITE = (243 / 255, 244 / 255, 242 / 255)
 CAP = (127 / 255, 136 / 255, 147 / 255)
 RGB = {"r": (194 / 255, 72 / 255, 60 / 255), "g": (63 / 255, 138 / 255, 87 / 255), "b": (60 / 255, 98 / 255, 181 / 255)}
 WORD = "FIXER"
+TAGLINE = "FILM EMULATION FOR DAVINCI RESOLVE"
 TRACK = 0.018
 KERN = {}
 AXIS = (0.32, 0.35, 0.39)
@@ -85,7 +86,7 @@ def banner(black, medium, data, out, scale):
     left = 0.06 * W
     base = H / 2 + 0.36 * size * 0.72
     draw_tracked(page, black, "blk", WORD, left, base, size, WHITE, TRACK, KERN)
-    cap = "FILM FROM THE DATASHEET · 36 STOCKS · DAVINCI RESOLVE"
+    cap = "FILM EMULATION · 42 STOCKS · DAVINCI RESOLVE"
     draw_tracked(page, medium, "med", cap, left + 0.004 * W, base + 0.014 * W + 18, 18, CAP, 0.05)
     page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False).save(out)
 
@@ -111,7 +112,7 @@ def photo_banner(black, medium, bg, out, scale):
     left = 0.055 * W
     base = H / 2 + 0.30 * size * 0.72
     draw_tracked(page, black, "blk", WORD, left, base, size, WHITE, TRACK, KERN)
-    draw_tracked(page, medium, "med", "FILM FROM THE DATASHEET", left + 0.004 * W, base + 34, 17, WHITE, 0.08)
+    draw_tracked(page, medium, "med", TAGLINE, left + 0.004 * W, base + 34, 17, WHITE, 0.08)
     page.insert_text((left + 2, H - 18), "Rendered by FIXER · Vision3 500T → 2383", fontsize=9, fontname="med", color=CAP)
     page.get_pixmap(matrix=pymupdf.Matrix(scale, scale), alpha=False).save(out)
 
