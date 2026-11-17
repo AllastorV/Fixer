@@ -5,7 +5,6 @@
 [![NVIDIA CUDA](https://img.shields.io/badge/NVIDIA-CUDA-76B900?logo=nvidia&logoColor=white)](#install)
 [![AMD OpenCL](https://img.shields.io/badge/AMD-OpenCL-ED1C24?logo=amd&logoColor=white)](https://github.com/AllastorV/Fixer/tree/opencl#install)
 [![Download source ZIP](https://img.shields.io/badge/Source-ZIP-24292F?logo=github)](https://github.com/AllastorV/Fixer/archive/refs/tags/v1.1.1.zip)
-[![Download Windows x64 installer EXE](https://img.shields.io/badge/Download-Windows%20x64%20EXE-0078D4)](https://github.com/AllastorV/Fixer/releases/download/v1.1.1/FIXER-1.1.1-win64-cuda-setup.exe)
 [![Apache 2.0 license](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 **Free, open-source film emulation and reference matching for DaVinci Resolve.**
@@ -25,6 +24,14 @@ The same 1985 Ocean City scan shows how cinema negatives, still negatives, slide
 The film gallery and feature comparisons use a uniform +0.75 EV display adjustment.
 
 [![Six FIXER renders of the same frame in Vision3 250D, Portra 400, Ektar 100, Velvia 50, Ektachrome E100 and HP5 Plus](docs/readme/film-stocks.jpg)](docs/readme/film-stocks.jpg)
+
+### Film stocks
+
+- **Kodak:** Vision3 50D, 200T, 250D and 500T; Portra 160, 160NC, 160VC, 400 and 800; Ektar 100; Gold 200; UltraMax 400; Pro Image 100; Supra 100; Aerocolor IV 125; Ektachrome E100; Kodachrome 64; Tri-X 400; T-Max 100 and 400; Plus-X; Double-X 5222.
+- **Fujifilm:** Eterna Vivid 500; Velvia 50 and 100; Provia 100F; Pro 400H; Superia 200, X-TRA 400 and 1600; C200; Fujicolor 100; Fujifilm 400; Acros II.
+- **Ilford:** HP5 Plus, FP4 Plus, Pan F Plus, Delta 100, 400 and 3200, XP2 Super, and the experimental SFX 200.
+
+Cinema negatives print through Kodak Vision 2383, colour negatives through Kodak Endura paper, and black-and-white films through Ilford Multigrade IV RC. Slides are viewed directly.
 
 ## Film controls
 
