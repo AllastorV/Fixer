@@ -3,8 +3,8 @@
 ![FIXER](docs/brand/fixer-banner-photo@2x.png)
 
 [![NVIDIA CUDA](https://img.shields.io/badge/NVIDIA-CUDA-76B900?logo=nvidia&logoColor=white)](#install)
-[![Download source ZIP](https://img.shields.io/badge/Source-ZIP-24292F?logo=github)](https://github.com/AllastorV/Fixer/archive/refs/tags/v1.1.0.zip)
-[![Download Windows x64 installer EXE](https://img.shields.io/badge/Download-Windows%20x64%20EXE-0078D4)](https://github.com/AllastorV/Fixer/releases/download/v1.1.0/FIXER-1.1.0-win64-cuda-setup.exe)
+[![Download source ZIP](https://img.shields.io/badge/Source-ZIP-24292F?logo=github)](https://github.com/AllastorV/Fixer/archive/refs/tags/v1.1.1.zip)
+[![Download Windows x64 installer EXE](https://img.shields.io/badge/Download-Windows%20x64%20EXE-0078D4)](https://github.com/AllastorV/Fixer/releases/download/v1.1.1/FIXER-1.1.1-win64-cuda-setup.exe)
 [![Apache 2.0 license](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 **Free, open-source film emulation and reference matching for DaVinci Resolve.**
@@ -57,10 +57,10 @@ Matching transfers tone, saturation and colour casts from the reference. **Simpl
 
 ### Windows installer (EXE)
 
-Requires 64-bit Windows, DaVinci Resolve and a CUDA-capable NVIDIA GPU. The installer includes the FIXER OpenFX plugin and its ready-to-use film profiles and LUTs.
+Requires 64-bit Windows, DaVinci Resolve and a CUDA-capable NVIDIA GPU. For AMD and Intel GPUs, use [FIXER OpenCL](https://github.com/AllastorV/Fixer/releases/tag/v1.1.1-opencl) from the `opencl` branch. The installer includes the FIXER OpenFX plugin and its ready-to-use film profiles and LUTs.
 
 1. Close DaVinci Resolve.
-2. Download and run [FIXER v1.1.0 for Windows x64](https://github.com/AllastorV/Fixer/releases/download/v1.1.0/FIXER-1.1.0-win64-cuda-setup.exe). Accept the Windows administrator prompt and complete setup.
+2. Download and run [FIXER v1.1.1 for Windows x64](https://github.com/AllastorV/Fixer/releases/download/v1.1.1/FIXER-1.1.1-win64-cuda-setup.exe). Accept the Windows administrator prompt and complete setup.
 3. Open Resolve, go to **Preferences → Memory and GPU**, and set **GPU processing mode** to **CUDA**. If you change the setting, restart Resolve.
 4. On the **Color** page, add **OpenFX → FIXER → FIXER** to the last node after your scene grade.
 
@@ -94,7 +94,7 @@ python -m unittest discover -s tests -p "test_*.py"
 
 The [test tools](bake/tools) include Resolve render comparisons, stock and parameter checks, and Lab scan fitting. See the [numeric contract](docs/W01-numeric-contract.md) for tolerances.
 
-Planned work includes OpenCL for AMD and Intel GPUs on Windows, Metal for macOS, and more film stocks.
+An OpenCL build for AMD, Intel and NVIDIA GPUs lives on the `opencl` branch. Planned work includes Metal for macOS and more film stocks.
 
 ## License and image credits
 
