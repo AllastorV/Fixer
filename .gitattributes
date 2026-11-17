@@ -1,0 +1,2 @@
+bake/tests/** linguist-detectable=false
+bake/tools/** linguist-detectable=false
