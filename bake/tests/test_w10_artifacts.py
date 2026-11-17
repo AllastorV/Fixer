@@ -13,7 +13,7 @@ from filmemu.pipeline import Params, render
 from tests.test_w03_cuda import CLI, make_luts, run_cuda
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "build" / "release" / "Fixer.ofx.bundle" / "Contents" / "Resources" / "profiles"
+PROFILES = ROOT / "build" / "release" / "FixerOpenCL.ofx.bundle" / "Contents" / "Resources" / "profiles"
 STOCKS = ("kodak-vision3-250d-2383", "kodak-portra400-endura", "fuji-velvia50", "ilford-hp5plus-ilford-multigrade-iv-rc")
 
 

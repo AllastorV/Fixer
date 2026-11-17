@@ -34,7 +34,7 @@
 
 namespace {
 
-constexpr const char* kPluginId = "com.alpcavas.fixer";
+constexpr const char* kPluginId = "com.alpcavas.fixer.opencl";
 constexpr const char* kDefaultProfile = "kodak-vision3-250d-2383";
 constexpr const char* kSpaceLabels[] = {"DaVinci Wide Gamut / Intermediate", "DaVinci Wide Gamut / Linear", "ACEScct",
                                         "Rec.709 / Gamma 2.4"};
@@ -93,7 +93,8 @@ std::vector<std::wstring> gSavedLooks;
 struct Instance {
     std::mutex lock;
     std::map<int, std::unique_ptr<fe::LutSet>> luts;
-    int device = -1;
+    cl_context context = nullptr;
+    cl_device_id device = nullptr;
     std::string match_text;
     double match_s = -1.0, match_p = -1.0;
     bool match_ok = false, match_only = false, order_warned = false;
@@ -360,9 +361,9 @@ void define_saved_looks(OfxParamSetHandle params);
 OfxStatus describe(OfxImageEffectHandle effect) {
     OfxPropertySetHandle props;
     gEffect->getPropertySet(effect, &props);
-    gProp->propSetString(props, kOfxPropLabel, 0, "FIXER");
+    gProp->propSetString(props, kOfxPropLabel, 0, "FIXER OpenCL");
     gProp->propSetString(props, kOfxImageEffectPluginPropGrouping, 0, "FIXER");
-    gProp->propSetString(props, kOfxPropIcon, 1, "com.alpcavas.fixer.png");
+    gProp->propSetString(props, kOfxPropIcon, 1, "com.alpcavas.fixer.opencl.png");
     gProp->propSetString(props, kOfxImageEffectPropSupportedContexts, 0, kOfxImageEffectContextFilter);
     gProp->propSetString(props, kOfxImageEffectPropSupportedContexts, 1, kOfxImageEffectContextGeneral);
     gProp->propSetString(props, kOfxImageEffectPropSupportedPixelDepths, 0, kOfxBitDepthFloat);
@@ -370,8 +371,7 @@ OfxStatus describe(OfxImageEffectHandle effect) {
     gProp->propSetInt(props, kOfxImageEffectPropSupportsMultiResolution, 0, 1);
     gProp->propSetInt(props, kOfxImageEffectPluginPropSingleInstance, 0, 0);
     gProp->propSetString(props, kOfxImageEffectPluginRenderThreadSafety, 0, kOfxImageEffectRenderFullySafe);
-    gProp->propSetString(props, kOfxImageEffectPropCudaRenderSupported, 0, "true");
-    gProp->propSetString(props, kOfxImageEffectPropCudaStreamSupported, 0, "true");
+    gProp->propSetString(props, kOfxImageEffectPropOpenCLRenderSupported, 0, "true");
     return kOfxStatOK;
 }
 
@@ -580,8 +580,8 @@ void log_timing(OfxImageEffectHandle effect, const char* text) {
     if (gMessage && GetEnvironmentVariableW(L"FIXER_TIMING", nullptr, 0) > 0) gMessage->message(effect, kOfxMessageLog, nullptr, "%s", text);
 }
 
-const char* lut_error(cudaError_t e) {
-    return e == cudaErrorMemoryAllocation
+const char* lut_error(cl_int e) {
+    return fe::out_of_memory(e)
                ? "FIXER: not enough GPU memory to load the film stock (about 15 MB). Close other GPU programs or free GPU memory in Resolve."
                : "FIXER: GPU LUT upload failed.";
 }
@@ -595,37 +595,43 @@ int film_key(OfxImageEffectHandle effect, int profile, OfxTime t) {
     return profile * 8 + (use_bal ? 2 : use_alt ? 1 : 0) + (use_scan ? 4 : 0);
 }
 
-cudaError_t fill_film(int key, fe::LutSet& luts) {
+cl_int fill_film(int key, fe::LutSet& luts, cl_context context) {
     const Profile& pr = gProfiles[key / 8];
     bool use_alt = (key & 1) != 0, use_bal = (key & 2) != 0, use_scan = (key & 4) != 0;
     for (int s = 0; s < (pr.two_stage ? 4 : 3); ++s) {
         const std::vector<float>& data = (use_scan && s == 3) ? pr.scan[use_bal ? 1 : 0]
                                          : (use_bal && !pr.bal[s].empty()) ? pr.bal[s]
                                          : (use_alt && s < 3) ? pr.alt[s] : pr.slots[s];
-        cudaError_t ue = luts.upload(s, data.data(), pr.size);
-        if (ue != cudaSuccess) return ue;
+        cl_int ue = luts.upload(context, s, data.data(), pr.size);
+        if (ue != CL_SUCCESS) return ue;
     }
     if (pr.two_stage) luts.set_print_domain(pr.print_lo, pr.print_hi);
     if (!pr.grain.empty()) luts.set_grain_table(pr.grain.data());
     luts.set_grain_mono(pr.grain_mono);
-    return cudaSuccess;
+    return CL_SUCCESS;
 }
 
-fe::LutSet* film_luts(OfxImageEffectHandle effect, Instance* inst, int profile, OfxTime t) {
-    int device = 0;
-    cudaGetDevice(&device);
-    if (inst->device != device) {
+fe::LutSet* film_luts(OfxImageEffectHandle effect, Instance* inst, int profile, OfxTime t, cl_command_queue queue) {
+    cl_context context = nullptr;
+    cl_device_id device = nullptr;
+    if (clGetCommandQueueInfo(queue, CL_QUEUE_CONTEXT, sizeof context, &context, nullptr) != CL_SUCCESS ||
+        clGetCommandQueueInfo(queue, CL_QUEUE_DEVICE, sizeof device, &device, nullptr) != CL_SUCCESS) {
+        post_error(effect, "FIXER: the host gave an invalid OpenCL command queue.");
+        return nullptr;
+    }
+    if (inst->context != context || inst->device != device) {
         inst->luts.clear();
         inst->match_set.reset();
         inst->match_prev.reset();
+        inst->context = context;
         inst->device = device;
     }
     int key = film_key(effect, profile, t);
     auto& luts = inst->luts[key];
     if (!luts) {
         luts = std::make_unique<fe::LutSet>();
-        cudaError_t ue = fill_film(key, *luts);
-        if (ue != cudaSuccess) {
+        cl_int ue = fill_film(key, *luts, context);
+        if (ue != CL_SUCCESS) {
             luts.reset();
             post_error(effect, lut_error(ue));
             return nullptr;
@@ -673,7 +679,7 @@ void cache_match(Instance* inst, const std::string& text, double s, double pr, O
     ++inst->match_gen;
 }
 
-bool apply_match(OfxImageEffectHandle effect, Instance* inst, fe::LutSet& luts, OfxTime t, fe::RenderParams& p, cudaStream_t stream) {
+bool apply_match(OfxImageEffectHandle effect, Instance* inst, fe::LutSet& luts, OfxTime t, fe::RenderParams& p, cl_command_queue queue) {
     double s = fxm::clip(get_double(effect, "matchStrength", t), 0.0, 1.0);
     double pr = fxm::clip(get_double(effect, "matchProtectSkin", t), 0.0, 1.0);
     if (!(s > 0.0) || get_choice(effect, "matchShow", t) != 0) return true;
@@ -683,14 +689,14 @@ bool apply_match(OfxImageEffectHandle effect, Instance* inst, fe::LutSet& luts, 
     if (!inst->match_set || inst->match_set_gen != inst->match_gen) {
         double t0 = now_ms();
         auto fresh = std::make_unique<fe::LutSet>();
-        cudaError_t e = fresh->upload(fe::LutSet::kMatchSlot, inst->match_lut.data(), fxm::kLutSize);
-        if (e != cudaSuccess) {
-            post_error(effect, e == cudaErrorMemoryAllocation ? "FIXER: not enough GPU memory to load the reference match."
-                                                              : "FIXER: GPU upload of the reference match failed.");
+        cl_int e = fresh->upload(luts.context(), fe::LutSet::kMatchSlot, inst->match_lut.data(), fxm::kLutSize);
+        if (e != CL_SUCCESS) {
+            post_error(effect, fe::out_of_memory(e) ? "FIXER: not enough GPU memory to load the reference match."
+                                                    : "FIXER: GPU upload of the reference match failed.");
             return false;
         }
         if (inst->match_prev) {
-            cudaStreamSynchronize(stream);
+            clFinish(queue);
             inst->match_prev.reset();
         }
         inst->match_prev = std::move(inst->match_set);
@@ -763,10 +769,13 @@ char* pixel_at(const ImageRef& img, int x, int y) {
 OfxStatus render(OfxImageEffectHandle effect, OfxPropertySetHandle in) {
     OfxTime t = 0;
     gProp->propGetDouble(in, kOfxPropTime, 0, &t);
-    int cuda_enabled = 0;
-    gProp->propGetInt(in, kOfxImageEffectPropCudaEnabled, 0, &cuda_enabled);
-    if (!cuda_enabled) {
-        post_error(effect, "FIXER needs CUDA. Set Resolve GPU processing mode to CUDA.");
+    int opencl_enabled = 0;
+    gProp->propGetInt(in, kOfxImageEffectPropOpenCLEnabled, 0, &opencl_enabled);
+    void* queue_ptr = nullptr;
+    gProp->propGetPointer(in, kOfxImageEffectPropOpenCLCommandQueue, 0, &queue_ptr);
+    cl_command_queue queue = static_cast<cl_command_queue>(queue_ptr);
+    if (!opencl_enabled || !queue) {
+        post_error(effect, "FIXER OpenCL needs OpenCL. Set Resolve GPU processing mode to OpenCL.");
         return kOfxStatFailed;
     }
     int profile = resolve_profile(effect, t);
@@ -774,9 +783,6 @@ OfxStatus render(OfxImageEffectHandle effect, OfxPropertySetHandle in) {
         post_error(effect, "FIXER: no valid profile in the plugin Resources/profiles folder.");
         return kOfxStatFailed;
     }
-    void* stream_ptr = nullptr;
-    gProp->propGetPointer(in, kOfxImageEffectPropCudaStream, 0, &stream_ptr);
-    cudaStream_t stream = static_cast<cudaStream_t>(stream_ptr);
     OfxRectI win{};
     gProp->propGetIntN(in, kOfxImageEffectPropRenderWindow, 4, &win.x1);
     OfxImageClipHandle src_clip, dst_clip;
@@ -793,17 +799,17 @@ OfxStatus render(OfxImageEffectHandle effect, OfxPropertySetHandle in) {
     win.y2 = std::min(win.y2, std::min(src.bounds.y2, dst.bounds.y2));
     int w = win.x2 - win.x1, h = win.y2 - win.y1;
     if (w <= 0 || h <= 0) return kOfxStatOK;
-    if (src.row_bytes < w * 16 || dst.row_bytes < w * 16) {
+    if (src.row_bytes < w * 16 || dst.row_bytes < w * 16 || src.row_bytes % 4 || dst.row_bytes % 4) {
         post_error(effect, "FIXER: unsupported image row layout.");
         return kOfxStatFailed;
     }
     Instance* inst = instance_of(effect);
     if (!inst) return kOfxStatFailed;
     std::lock_guard<std::mutex> guard(inst->lock);
-    fe::LutSet* luts = film_luts(effect, inst, profile, t);
+    fe::LutSet* luts = film_luts(effect, inst, profile, t, queue);
     if (!luts) return kOfxStatFailed;
     fe::RenderParams p = base_params(effect, t);
-    if (!apply_match(effect, inst, *luts, t, p, stream)) return kOfxStatFailed;
+    if (!apply_match(effect, inst, *luts, t, p, queue)) return kOfxStatFailed;
     p.premultiplied = src.premult == kOfxImagePreMultiplied ? 1 : 0;
     double scale[2] = {1.0, 1.0};
     gProp->propGetDoubleN(in, kOfxImageEffectPropRenderScale, 2, scale);
@@ -825,11 +831,10 @@ OfxStatus render(OfxImageEffectHandle effect, OfxPropertySetHandle in) {
     p.spatial_half = get_choice(effect, "glowQuality", t) != 0 ? 1 : 0;
     fe::Rect src_bounds{src.bounds.x1, src.bounds.y1, src.bounds.x2, src.bounds.y2};
     fe::Rect dst_bounds{dst.bounds.x1, dst.bounds.y1, dst.bounds.x2, dst.bounds.y2};
-    cudaError_t e = fe::render_region(fe::Image{src.data, static_cast<size_t>(src.row_bytes), src_bounds},
-                                      reinterpret_cast<float*>(dst.data), static_cast<size_t>(dst.row_bytes), dst_bounds,
-                                      fe::Rect{win.x1, win.y1, win.x2, win.y2}, p, *luts, stream);
-    if (e == cudaSuccess && !stream) e = cudaStreamSynchronize(nullptr);
-    if (e == cudaErrorMemoryAllocation) {
+    cl_int e = fe::render_region(fe::Image{reinterpret_cast<cl_mem>(src.data), 0, static_cast<size_t>(src.row_bytes), src_bounds},
+                                 reinterpret_cast<cl_mem>(dst.data), static_cast<size_t>(dst.row_bytes), dst_bounds,
+                                 fe::Rect{win.x1, win.y1, win.x2, win.y2}, p, *luts, queue);
+    if (fe::out_of_memory(e)) {
         bool glow = p.halation_amount > 0.0f || p.bloom_amount > 0.0f;
         double mb = static_cast<double>(w) * h * 16.0 * (glow ? (p.spatial_half ? 2.0 : 4.0) : 1.0) / (1024.0 * 1024.0);
         char msg[320];
@@ -839,8 +844,10 @@ OfxStatus render(OfxImageEffectHandle effect, OfxPropertySetHandle in) {
         post_error(effect, msg);
         return kOfxStatFailed;
     }
-    if (e != cudaSuccess) {
-        post_error(effect, cudaGetErrorString(e));
+    if (e != CL_SUCCESS) {
+        std::string msg = std::string("FIXER: ") + fe::error_string(e);
+        if (e == CL_BUILD_PROGRAM_FAILURE) msg += ": " + fe::build_log().substr(0, 400);
+        post_error(effect, msg.c_str());
         return kOfxStatFailed;
     }
     return kOfxStatOK;
@@ -966,12 +973,75 @@ struct EditBlock {
     EditBlock& operator=(const EditBlock&) = delete;
 };
 
-struct DeviceScope {
-    int prev = -1;
-    ~DeviceScope() {
-        if (prev >= 0) cudaSetDevice(prev);
+std::vector<cl_platform_id> cl_platforms() {
+    cl_uint n = 0;
+    if (clGetPlatformIDs(0, nullptr, &n) != CL_SUCCESS || !n) return {};
+    std::vector<cl_platform_id> platforms(n);
+    if (clGetPlatformIDs(n, platforms.data(), nullptr) != CL_SUCCESS) return {};
+    return platforms;
+}
+
+struct ClScratch {
+    cl_context context = nullptr;
+    cl_command_queue queue = nullptr;
+    std::vector<cl_mem> mems;
+    ~ClScratch() {
+        for (cl_mem m : mems) clReleaseMemObject(m);
+    }
+    cl_int open(cl_device_id device) {
+        static std::mutex lock;
+        static std::map<cl_device_id, std::pair<cl_context, cl_command_queue>> cache;
+        if (!device) {
+            for (cl_platform_id pl : cl_platforms())
+                if (clGetDeviceIDs(pl, CL_DEVICE_TYPE_GPU, 1, &device, nullptr) == CL_SUCCESS) break;
+            if (!device) return CL_DEVICE_NOT_FOUND;
+        }
+        std::lock_guard<std::mutex> guard(lock);
+        auto it = cache.find(device);
+        if (it == cache.end()) {
+            cl_int e = CL_SUCCESS;
+            cl_context c = clCreateContext(nullptr, 1, &device, nullptr, nullptr, &e);
+            if (e != CL_SUCCESS) return e;
+            cl_command_queue q = clCreateCommandQueue(c, device, 0, &e);
+            if (e != CL_SUCCESS) {
+                clReleaseContext(c);
+                return e;
+            }
+            it = cache.emplace(device, std::make_pair(c, q)).first;
+        }
+        context = it->second.first;
+        queue = it->second.second;
+        return CL_SUCCESS;
+    }
+    cl_mem buffer(size_t bytes, void* init, cl_int& e) {
+        cl_mem m = clCreateBuffer(context, CL_MEM_READ_WRITE | (init ? CL_MEM_COPY_HOST_PTR : 0), bytes, init, &e);
+        if (e == CL_SUCCESS) mems.push_back(m);
+        return m;
     }
 };
+
+bool host_readable(const void* p, size_t bytes);
+
+bool is_cl_object(const void* p) {
+    if (!host_readable(p, sizeof(void*))) return false;
+    const void* dispatch = *static_cast<const void* const*>(p);
+    for (cl_platform_id pl : cl_platforms())
+        if (*reinterpret_cast<const void* const*>(pl) == dispatch) return true;
+    return false;
+}
+
+bool host_readable(const void* p, size_t bytes) {
+    const char* at = static_cast<const char*>(p);
+    const char* end = at + bytes;
+    while (at < end) {
+        MEMORY_BASIC_INFORMATION mi{};
+        if (!VirtualQuery(at, &mi, sizeof mi) || mi.State != MEM_COMMIT || (mi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) ||
+            !(mi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE)))
+            return false;
+        at = static_cast<const char*>(mi.BaseAddress) + mi.RegionSize;
+    }
+    return true;
+}
 
 constexpr UINT kRefMaxSide = 30000, kRefScaled = 1024;
 
@@ -1108,14 +1178,12 @@ OfxStatus create_grade(OfxImageEffectHandle effect, OfxTime t) {
         ImageRef img;
         if (!src_clip || !fetch(src_clip, t, nullptr, img) || img.depth != kOfxBitDepthFloat || img.components != kOfxImageComponentRGBA)
             return fail("FIXER: cannot read the current frame for the reference match.");
-        cudaPointerAttributes attr{};
-        bool on_device = cudaPointerGetAttributes(&attr, img.data) == cudaSuccess && attr.type == cudaMemoryTypeDevice;
-        cudaGetLastError();
-        if (on_device) return fail("FIXER: the host gave the frame in GPU memory; Create grade needs it in CPU memory.");
         if (img.row_bytes < 0) return fail("FIXER: unsupported image row layout.");
         int fw = img.bounds.x2 - img.bounds.x1, fh = img.bounds.y2 - img.bounds.y1;
         if (fw <= 0 || fh <= 0 || img.row_bytes < fw * 16 || img.row_bytes % 4)
             return fail("FIXER: cannot read the current frame for the reference match.");
+        if (is_cl_object(img.data) || !host_readable(img.data,static_cast<size_t>(img.row_bytes) * (fh - 1) + static_cast<size_t>(fw) * 16))
+            return fail("FIXER: the host gave the frame in GPU memory; Create grade needs it in CPU memory.");
         ms[0] = now_ms() - t0;
         t0 = now_ms();
         std::vector<double> down = fxm::downsample(reinterpret_cast<const float*>(img.data), img.row_bytes / 4, fw, fh, 4, 4, 1.0, dw, dh);
@@ -1126,34 +1194,26 @@ OfxStatus create_grade(OfxImageEffectHandle effect, OfxTime t) {
     t0 = now_ms();
     bool only = get_choice(effect, "matchSource", t) == 1;
     {
-        DeviceScope scope;
-        int current = 0, device = -1;
-        cudaGetDevice(&current);
+        cl_device_id device = nullptr;
         {
             std::lock_guard<std::mutex> guard(inst->lock);
             device = inst->device;
         }
-        if (device >= 0 && device != current) {
-            if (cudaSetDevice(device) != cudaSuccess) return fail("FIXER: cannot select the GPU used for rendering.");
-            scope.prev = current;
-        }
+        ClScratch cl;
+        if (cl.open(device) != CL_SUCCESS) return fail("FIXER: cannot open the OpenCL GPU used for rendering.");
         fe::LutSet luts;
-        cudaError_t e = fill_film(film_key(effect, profile, t), luts);
-        if (e != cudaSuccess) return fail(lut_error(e));
+        cl_int e = fill_film(film_key(effect, profile, t), luts, cl.context);
+        if (e != CL_SUCCESS) return fail(lut_error(e));
         fe::RenderParams p = base_params(effect, t);
         p.out_space = 3;
         p.impact = 1.0f;
         if (only) p.reserved2[0] = fe::LutSet::kFilmBypass;
         size_t pitch = static_cast<size_t>(dw) * 16, bytes = pitch * dh;
-        float *d_src = nullptr, *d_dst = nullptr;
-        e = cudaMalloc(&d_src, bytes);
-        if (e == cudaSuccess) e = cudaMalloc(&d_dst, bytes);
-        if (e == cudaSuccess) e = cudaMemcpy(d_src, host.data(), bytes, cudaMemcpyHostToDevice);
-        if (e == cudaSuccess) e = fe::render(d_src, pitch, d_dst, pitch, dw, dh, p, luts, nullptr);
-        if (e == cudaSuccess) e = cudaMemcpy(host.data(), d_dst, bytes, cudaMemcpyDeviceToHost);
-        cudaFree(d_src);
-        cudaFree(d_dst);
-        if (e != cudaSuccess) return fail(cudaGetErrorString(e));
+        cl_mem d_src = cl.buffer(bytes, host.data(), e);
+        cl_mem d_dst = e == CL_SUCCESS ? cl.buffer(bytes, nullptr, e) : nullptr;
+        if (e == CL_SUCCESS) e = fe::render(d_src, 0, pitch, d_dst, 0, pitch, dw, dh, p, luts, cl.queue);
+        if (e == CL_SUCCESS) e = clEnqueueReadBuffer(cl.queue, d_dst, CL_TRUE, 0, bytes, host.data(), 0, nullptr, nullptr);
+        if (e != CL_SUCCESS) return fail(fe::error_string(e));
     }
     ms[2] = now_ms() - t0;
     prog.step("Reading reference", 45);

@@ -1,13 +1,11 @@
 cmake_minimum_required(VERSION 3.26)
-project(film_emulation_ofx LANGUAGES CXX CUDA)
+project(fixer_opencl_ofx LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CUDA_STANDARD 17)
-set(CMAKE_CUDA_ARCHITECTURES 86)
 set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-find_package(CUDAToolkit REQUIRED)
+find_package(OpenCL REQUIRED)
 set(GEN_DIR ${CMAKE_BINARY_DIR}/gen)
 add_custom_command(
   OUTPUT ${GEN_DIR}/spaces_gen.h
@@ -15,13 +13,18 @@ add_custom_command(
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/bake/gen_header.py ${GEN_DIR}/spaces_gen.h
   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/bake
   DEPENDS ${CMAKE_SOURCE_DIR}/bake/gen_header.py ${CMAKE_SOURCE_DIR}/bake/filmemu/spaces.py)
+add_custom_command(
+  OUTPUT ${GEN_DIR}/kernels_cl.h
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${GEN_DIR}
+  COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_SOURCE_DIR}/engine/src/kernels.cl -DOUT=${GEN_DIR}/kernels_cl.h -P ${CMAKE_SOURCE_DIR}/engine/embed.cmake
+  DEPENDS ${CMAKE_SOURCE_DIR}/engine/src/kernels.cl ${CMAKE_SOURCE_DIR}/engine/embed.cmake)
 
-add_library(fe_engine STATIC engine/src/render.cu ${GEN_DIR}/spaces_gen.h)
+add_library(fe_engine STATIC engine/src/render.cpp ${GEN_DIR}/spaces_gen.h ${GEN_DIR}/kernels_cl.h)
 target_include_directories(fe_engine PUBLIC engine/include PRIVATE ${GEN_DIR})
-target_link_libraries(fe_engine PUBLIC CUDA::cudart_static)
-set_target_properties(fe_engine PROPERTIES POSITION_INDEPENDENT_CODE ON CUDA_RUNTIME_LIBRARY Static)
+target_link_libraries(fe_engine PUBLIC OpenCL::OpenCL)
+set_target_properties(fe_engine PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-set(BUNDLE_DIR ${CMAKE_BINARY_DIR}/Fixer.ofx.bundle)
+set(BUNDLE_DIR ${CMAKE_BINARY_DIR}/FixerOpenCL.ofx.bundle)
 set(FIXER_PREBUILT_PROFILES "" CACHE PATH "Directory containing prebuilt film profiles")
 if(FIXER_PREBUILT_PROFILES)
   file(GLOB PROFILE_MANIFESTS "${FIXER_PREBUILT_PROFILES}/*/profile.json")
@@ -52,19 +55,18 @@ add_library(film_emulation_ofx SHARED plugin/ofx_plugin.cpp)
 target_include_directories(film_emulation_ofx PRIVATE external/openfx/include)
 target_link_libraries(film_emulation_ofx PRIVATE fe_engine)
 set_target_properties(film_emulation_ofx PROPERTIES
-  OUTPUT_NAME Fixer SUFFIX .ofx
+  OUTPUT_NAME FixerOpenCL SUFFIX .ofx
   RUNTIME_OUTPUT_DIRECTORY ${BUNDLE_DIR}/Contents/Win64
   LIBRARY_OUTPUT_DIRECTORY ${BUNDLE_DIR}/Contents/Win64
 )
 add_dependencies(film_emulation_ofx fe_luts)
 add_custom_command(TARGET film_emulation_ofx POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/plugin/resources/com.alpcavas.fixer.png
-          ${BUNDLE_DIR}/Contents/Resources/com.alpcavas.fixer.png)
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/plugin/resources/com.alpcavas.fixer.opencl.png
+          ${BUNDLE_DIR}/Contents/Resources/com.alpcavas.fixer.opencl.png)
 
 add_executable(ofx_test_host engine/tools/ofx_test_host.cpp)
 target_include_directories(ofx_test_host PRIVATE external/openfx/include)
-target_link_libraries(ofx_test_host PRIVATE CUDA::cudart_static)
+target_link_libraries(ofx_test_host PRIVATE OpenCL::OpenCL)
 
 add_executable(fe_cli engine/tools/fe_cli.cpp)
 target_link_libraries(fe_cli PRIVATE fe_engine)
-set_target_properties(fe_cli PROPERTIES CUDA_RUNTIME_LIBRARY Static)

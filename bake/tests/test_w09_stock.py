@@ -14,7 +14,7 @@ from tests.test_w03_cuda import CLI, run_cuda
 from tests.test_w06_spectral import px
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-PROFILE = ROOT / "build" / "release" / "Fixer.ofx.bundle" / "Contents" / "Resources" / "profiles" / "kodak-vision3-250d-2383"
+PROFILE = ROOT / "build" / "release" / "FixerOpenCL.ofx.bundle" / "Contents" / "Resources" / "profiles" / "kodak-vision3-250d-2383"
 NEG, PRT = "kodak-vision3-250d", "kodak-2383"
 
 

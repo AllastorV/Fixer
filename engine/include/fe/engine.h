@@ -1,5 +1,6 @@
 #pragma once
-#include <cuda_runtime.h>
+#define CL_TARGET_OPENCL_VERSION 120
+#include <CL/cl.h>
 
 #include <string>
 
@@ -14,7 +15,8 @@ struct Rect {
 };
 
 struct Image {
-    const char* base;
+    cl_mem mem;
+    size_t offset;
     size_t pitch;
     Rect bounds;
 };
@@ -30,17 +32,13 @@ public:
     static constexpr int kMatchSlot = 4;
     static constexpr int kMatchOn = 1;
     static constexpr int kFilmBypass = 2;
-    cudaError_t upload(int slot, const float* rgb, int size);
-    void borrow_match(const LutSet& from) {
-        if (!match_borrowed_ && arr_[kMatchSlot]) return;
-        tex_[kMatchSlot] = from.tex_[kMatchSlot];
-        match_size_ = from.match_size_;
-        match_borrowed_ = true;
-    }
+    cl_int upload(cl_context context, int slot, const float* rgb, int size);
+    void borrow_match(const LutSet& from);
     void set_print_domain(float lo, float hi) { print_lo_ = lo, print_hi_ = hi; }
     bool ready() const;
-    bool two_stage() const { return tex_[kPrintSlot] != 0 && print_hi_ > print_lo_; }
-    cudaTextureObject_t texture(int slot) const { return tex_[slot]; }
+    bool two_stage() const { return buf_[kPrintSlot] != nullptr && print_hi_ > print_lo_; }
+    cl_mem buffer(int slot) const { return buf_[slot]; }
+    cl_context context() const { return context_; }
     int size() const { return size_; }
     int match_size() const { return match_size_; }
     float print_lo() const { return print_lo_; }
@@ -57,18 +55,22 @@ private:
     float grain_[3 * kGrainTableSize] = {};
     bool has_grain_ = false;
     bool grain_mono_ = false;
-    cudaArray_t arr_[5] = {};
-    cudaTextureObject_t tex_[5] = {};
+    cl_context context_ = nullptr;
+    cl_mem buf_[5] = {};
     int size_ = 0;
     int match_size_ = 0;
     bool match_borrowed_ = false;
     float print_lo_ = 0.0f, print_hi_ = 0.0f;
 };
 
-cudaError_t render(const float* src, size_t src_pitch, float* dst, size_t dst_pitch, int width, int height,
-                   const RenderParams& params, const LutSet& luts, cudaStream_t stream);
+cl_int render(cl_mem src, size_t src_offset, size_t src_pitch, cl_mem dst, size_t dst_offset, size_t dst_pitch, int width,
+              int height, const RenderParams& params, const LutSet& luts, cl_command_queue queue);
 
-cudaError_t render_region(Image src, float* dst_base, size_t dst_pitch, Rect dst_bounds, Rect window,
-                          const RenderParams& params, const LutSet& luts, cudaStream_t stream);
+cl_int render_region(Image src, cl_mem dst, size_t dst_pitch, Rect dst_bounds, Rect window, const RenderParams& params,
+                     const LutSet& luts, cl_command_queue queue);
+
+const char* error_string(cl_int e);
+std::string build_log();
+bool out_of_memory(cl_int e);
 
 }

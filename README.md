@@ -2,9 +2,9 @@
 
 ![FIXER](docs/brand/fixer-banner-photo@2x.png)
 
-[![NVIDIA CUDA](https://img.shields.io/badge/NVIDIA-CUDA-76B900?logo=nvidia&logoColor=white)](#install)
-[![Download source ZIP](https://img.shields.io/badge/Source-ZIP-24292F?logo=github)](https://github.com/AllastorV/Fixer/archive/refs/tags/v1.1.0.zip)
-[![Download Windows x64 installer EXE](https://img.shields.io/badge/Download-Windows%20x64%20EXE-0078D4)](https://github.com/AllastorV/Fixer/releases/download/v1.1.0/FIXER-1.1.0-win64-cuda-setup.exe)
+[![OpenCL](https://img.shields.io/badge/GPU-OpenCL-ED1C24)](#install)
+[![Download source ZIP](https://img.shields.io/badge/Source-ZIP-24292F?logo=github)](https://github.com/AllastorV/Fixer/archive/refs/tags/v1.1.1-opencl.zip)
+[![Download Windows x64 installer EXE](https://img.shields.io/badge/Download-Windows%20x64%20EXE-0078D4)](https://github.com/AllastorV/Fixer/releases/download/v1.1.1-opencl/FIXER-1.1.1-win64-opencl-setup.exe)
 [![Apache 2.0 license](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 **Free, open-source film emulation and reference matching for DaVinci Resolve.**
@@ -57,22 +57,22 @@ Matching transfers tone, saturation and colour casts from the reference. **Simpl
 
 ### Windows installer (EXE)
 
-Requires 64-bit Windows, DaVinci Resolve and a CUDA-capable NVIDIA GPU. The installer includes the FIXER OpenFX plugin and its ready-to-use film profiles and LUTs.
+This is the OpenCL build for AMD, Intel and NVIDIA GPUs. Requires 64-bit Windows, DaVinci Resolve and a GPU with OpenCL 1.2. The CUDA build lives on the `main` branch. The installer includes the FIXER OpenFX plugin and its ready-to-use film profiles and LUTs.
 
 1. Close DaVinci Resolve.
-2. Download and run [FIXER v1.1.0 for Windows x64](https://github.com/AllastorV/Fixer/releases/download/v1.1.0/FIXER-1.1.0-win64-cuda-setup.exe). Accept the Windows administrator prompt and complete setup.
-3. Open Resolve, go to **Preferences → Memory and GPU**, and set **GPU processing mode** to **CUDA**. If you change the setting, restart Resolve.
-4. On the **Color** page, add **OpenFX → FIXER → FIXER** to the last node after your scene grade.
+2. Download and run [FIXER OpenCL v1.1.1 for Windows x64](https://github.com/AllastorV/Fixer/releases/download/v1.1.1-opencl/FIXER-1.1.1-win64-opencl-setup.exe). Accept the Windows administrator prompt and complete setup.
+3. Open Resolve, go to **Preferences → Memory and GPU**, and set **GPU processing mode** to **OpenCL**. If you change the setting, restart Resolve.
+4. On the **Color** page, add **OpenFX → FIXER → FIXER OpenCL** to the last node after your scene grade.
 
-For manual installation, extract the Windows CUDA ZIP from [GitHub Releases](https://github.com/AllastorV/Fixer/releases/latest) and run `install.bat` with Resolve closed. Then follow steps 3 and 4 above.
+For manual installation, extract the Windows OpenCL ZIP from [GitHub Releases](https://github.com/AllastorV/Fixer/releases/tag/v1.1.1-opencl) and run `install.bat` with Resolve closed. Then follow steps 3 and 4 above.
 
 For a standard DaVinci YRGB workflow, feed **DaVinci Wide Gamut / Intermediate** into FIXER and select **Rec.709 / Gamma 2.4** as its output. FIXER performs tone mapping, so disable additional output tone mapping in managed projects. See the [node setups](docs/USER-GUIDE.md#node-trees) for the exact settings.
 
 ## Build from source
 
-Use Visual Studio 2022 Build Tools with C++, CUDA 13.5, CMake 3.26 or later, Ninja, and Python 3.12 with `numpy`, `scipy` and `colour-science`.
+Use Visual Studio 2022 Build Tools with C++, an OpenCL SDK (the CUDA Toolkit's headers and `OpenCL.lib` work), CMake 3.26 or later, Ninja, and Python 3.12 with `numpy`, `scipy` and `colour-science`.
 
-Clone the repository with Git so you can initialize the OpenFX submodule. From the repository root, run these commands in an **x64 Native Tools Command Prompt** with CUDA, Ninja and Python on `PATH`.
+Clone the repository with Git so you can initialize the OpenFX submodule. From the repository root, run these commands in an **x64 Native Tools Command Prompt** with Ninja and Python on `PATH` and `OpenCL_ROOT` pointing at the OpenCL SDK.
 
 ```bat
 git submodule update --init --recursive
@@ -81,11 +81,11 @@ cmake -S . -B build\release -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build\release
 ```
 
-The build produces `build\release\Fixer.ofx.bundle` with the plugin and baked LUTs. The repository also includes `build.bat` for the original development machine’s tool paths.
+The build produces `build\release\FixerOpenCL.ofx.bundle` with the plugin and baked LUTs. The repository also includes `build.bat` for the original development machine’s tool paths.
 
 ## Tests and roadmap
 
-From the repository root after building, run the Python, CUDA and OFX tests.
+From the repository root after building, run the Python, OpenCL and OFX tests.
 
 ```bat
 cd bake
@@ -94,7 +94,7 @@ python -m unittest discover -s tests -p "test_*.py"
 
 The [test tools](bake/tools) include Resolve render comparisons, stock and parameter checks, and Lab scan fitting. See the [numeric contract](docs/W01-numeric-contract.md) for tolerances.
 
-Planned work includes OpenCL for AMD and Intel GPUs on Windows, Metal for macOS, and more film stocks.
+Planned work includes Metal for macOS and more film stocks.
 
 ## License and image credits
 

@@ -1,4 +1,4 @@
-name: Build Windows installer
+name: Build Windows installer (OpenCL)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: true
 
 concurrency:
-  group: windows-release-${{ inputs.version }}
+  group: windows-release-opencl-${{ inputs.version }}
 
 jobs:
   installer:
@@ -18,6 +18,7 @@ jobs:
       contents: write
     env:
       VERSION: ${{ inputs.version }}
+      TAG: v${{ inputs.version }}-opencl
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
@@ -29,45 +30,38 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if ($env:VERSION -cnotmatch '^\d+\.\d+\.\d+$') { throw 'Use a version such as 1.0.0.' }
-          $release = gh release view "v$env:VERSION" --repo $env:GITHUB_REPOSITORY --json isDraft,targetCommitish,assets | ConvertFrom-Json
+          $release = gh release view $env:TAG --repo $env:GITHUB_REPOSITORY --json isDraft,targetCommitish,assets | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or -not $release.isDraft -or $release.targetCommitish -ne $env:GITHUB_SHA) {
             throw 'The draft release must target this workflow commit.'
           }
           $asset = $release.assets | Where-Object name -ceq 'fixer-film-profiles.zip'
-          $profilePath = 'release-input\profiles'
-          if (-not $asset) {
-            $asset = $release.assets | Where-Object name -ceq "FIXER-$env:VERSION-win64-cuda.zip"
-            $profilePath = "release-input\FIXER-$env:VERSION\Fixer.ofx.bundle\Contents\Resources\profiles"
-          }
           if (-not $asset) { throw 'Attach fixer-film-profiles.zip with a top-level profiles directory to the draft release.' }
-          gh release download "v$env:VERSION" --pattern $asset.name --dir release-archive --repo $env:GITHUB_REPOSITORY
+          gh release download $env:TAG --pattern $asset.name --dir release-archive --repo $env:GITHUB_REPOSITORY
           if ($LASTEXITCODE -ne 0) { throw 'Profile download failed.' }
           $archive = Join-Path 'release-archive' $asset.name
           $hash = (Get-FileHash -LiteralPath $archive).Hash
           if ($asset.digest -ne "sha256:$hash") { throw 'Profile ZIP checksum mismatch.' }
           Expand-Archive -LiteralPath $archive -DestinationPath release-input
-          "FIXER_PROFILES=$((Resolve-Path -LiteralPath $profilePath).Path)" >> $env:GITHUB_ENV
+          "FIXER_PROFILES=$((Resolve-Path -LiteralPath 'release-input\profiles').Path)" >> $env:GITHUB_ENV
 
-      - name: Set up CUDA and Python dependencies
+      - name: Set up OpenCL headers and Python dependencies
         run: |
           $base = 'https://developer.download.nvidia.com/compute/cuda/redist'
           $manifest = Invoke-RestMethod "$base/redistrib_13.5.0.json"
-          $cuda = Join-Path $env:RUNNER_TEMP 'cuda-13.5'
-          New-Item -ItemType Directory -Path $cuda | Out-Null
-          foreach ($name in 'cuda_nvcc', 'cuda_crt', 'cuda_cudart', 'cccl', 'libnvvm') {
-            $component = $manifest.$name.'windows-x86_64'
-            $zip = Join-Path $env:RUNNER_TEMP "$name.zip"
-            $expanded = Join-Path $env:RUNNER_TEMP $name
-            curl.exe --fail --silent --show-error --location --retry 3 "$base/$($component.relative_path)" -o $zip
-            if ($LASTEXITCODE -ne 0 -or (Get-FileHash -LiteralPath $zip).Hash -ne $component.sha256) {
-              throw "CUDA download failed verification: $name"
-            }
-            Expand-Archive -LiteralPath $zip -DestinationPath $expanded
-            $root = Get-ChildItem -LiteralPath $expanded -Directory | Select-Object -First 1
-            Copy-Item -Path (Join-Path $root.FullName '*') -Destination $cuda -Recurse -Force
+          $sdk = Join-Path $env:RUNNER_TEMP 'opencl-sdk'
+          New-Item -ItemType Directory -Path $sdk | Out-Null
+          $component = $manifest.cuda_opencl.'windows-x86_64'
+          if (-not $component) { throw 'cuda_opencl is missing from the CUDA redistributable manifest.' }
+          $zip = Join-Path $env:RUNNER_TEMP 'cuda_opencl.zip'
+          $expanded = Join-Path $env:RUNNER_TEMP 'cuda_opencl'
+          curl.exe --fail --silent --show-error --location --retry 3 "$base/$($component.relative_path)" -o $zip
+          if ($LASTEXITCODE -ne 0 -or (Get-FileHash -LiteralPath $zip).Hash -ne $component.sha256) {
+            throw 'OpenCL SDK download failed verification.'
           }
-          "CUDA_PATH=$cuda" >> $env:GITHUB_ENV
-          Join-Path $cuda 'bin' >> $env:GITHUB_PATH
+          Expand-Archive -LiteralPath $zip -DestinationPath $expanded
+          $root = Get-ChildItem -LiteralPath $expanded -Directory | Select-Object -First 1
+          Copy-Item -Path (Join-Path $root.FullName '*') -Destination $sdk -Recurse -Force
+          "OpenCL_ROOT=$sdk" >> $env:GITHUB_ENV
           py -3.12 -m pip install 'numpy==2.5.4' 'scipy==1.18.1' 'colour-science==0.4.7'
 
       - name: Compile the plugin and bundle the prebuilt profiles
@@ -75,28 +69,28 @@ jobs:
         run: |
           call "%ProgramFiles%\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
           for /f "delims=" %%i in ('py -3.12 -c "import sys; print(sys.executable)"') do set "PYTHON_EXE=%%i"
-          cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="%PYTHON_EXE%" -DCMAKE_CUDA_COMPILER="%CUDA_PATH%\bin\nvcc.exe" -DCUDAToolkit_ROOT="%CUDA_PATH%" -DFIXER_PREBUILT_PROFILES="%FIXER_PROFILES%" || exit /b 1
+          cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DPython3_EXECUTABLE="%PYTHON_EXE%" -DOpenCL_INCLUDE_DIR="%OpenCL_ROOT%\include" -DOpenCL_LIBRARY="%OpenCL_ROOT%\lib\x64\OpenCL.lib" -DFIXER_PREBUILT_PROFILES="%FIXER_PROFILES%" || exit /b 1
           cmake --build build/release --target film_emulation_ofx
 
       - name: Stage the plugin and ZIP
         run: |
-          $package = New-Item -ItemType Directory -Path "package\FIXER-$env:VERSION"
-          Copy-Item -LiteralPath 'build\release\Fixer.ofx.bundle' -Destination $package.FullName -Recurse
+          $package = New-Item -ItemType Directory -Path "package\FIXER-OpenCL-$env:VERSION"
+          Copy-Item -LiteralPath 'build\release\FixerOpenCL.ofx.bundle' -Destination $package.FullName -Recurse
           Copy-Item -LiteralPath 'LICENSE', 'NOTICE', 'install.bat', 'docs\USER-GUIDE.md' -Destination $package.FullName
-          Compress-Archive -LiteralPath $package.FullName -DestinationPath "FIXER-$env:VERSION-win64-cuda.zip"
+          Compress-Archive -LiteralPath $package.FullName -DestinationPath "FIXER-$env:VERSION-win64-opencl.zip"
 
       - name: Compile with Inno Setup
         run: |
           $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
-          $package = (Resolve-Path -LiteralPath "package\FIXER-$env:VERSION").Path
+          $package = (Resolve-Path -LiteralPath "package\FIXER-OpenCL-$env:VERSION").Path
           & $compiler "/DVersion=$env:VERSION" "/DPackageDir=$package" "/O$PWD" installer\Fixer.iss
           if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 
       - name: Verify installation and removal
         run: |
-          $setup = (Resolve-Path -LiteralPath "FIXER-$env:VERSION-win64-cuda-setup.exe").Path
-          $installed = Join-Path $env:CommonProgramFiles 'OFX\Plugins\Fixer.ofx.bundle'
-          $package = (Resolve-Path -LiteralPath "package\FIXER-$env:VERSION\Fixer.ofx.bundle").Path
+          $setup = (Resolve-Path -LiteralPath "FIXER-$env:VERSION-win64-opencl-setup.exe").Path
+          $installed = Join-Path $env:CommonProgramFiles 'OFX\Plugins\FixerOpenCL.ofx.bundle'
+          $package = (Resolve-Path -LiteralPath "package\FIXER-OpenCL-$env:VERSION\FixerOpenCL.ofx.bundle").Path
           $process = Start-Process -FilePath $setup -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer exited with $($process.ExitCode)." }
 
@@ -125,11 +119,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = "v$env:VERSION"
-          gh release upload $tag "FIXER-$env:VERSION-win64-cuda-setup.exe" "FIXER-$env:VERSION-win64-cuda.zip" --clobber --repo $env:GITHUB_REPOSITORY
+          gh release upload $env:TAG "FIXER-$env:VERSION-win64-opencl-setup.exe" "FIXER-$env:VERSION-win64-opencl.zip" --clobber --repo $env:GITHUB_REPOSITORY
           if ($LASTEXITCODE -ne 0) { throw 'Release upload failed.' }
-          if (Test-Path -LiteralPath 'release-archive\fixer-film-profiles.zip') {
-            gh release delete-asset $tag fixer-film-profiles.zip --yes --repo $env:GITHUB_REPOSITORY
-            if ($LASTEXITCODE -ne 0) { throw 'Could not remove the staging ZIP.' }
-          }
-          gh release edit $tag --draft=false --repo $env:GITHUB_REPOSITORY
+          gh release delete-asset $env:TAG fixer-film-profiles.zip --yes --repo $env:GITHUB_REPOSITORY
+          if ($LASTEXITCODE -ne 0) { throw 'Could not remove the staging ZIP.' }
+          gh release edit $env:TAG --draft=false --latest=false --repo $env:GITHUB_REPOSITORY

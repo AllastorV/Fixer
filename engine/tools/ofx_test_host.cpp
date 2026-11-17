@@ -1,7 +1,7 @@
 #define NOMINMAX
 #include <windows.h>
 
-#include <cuda_runtime.h>
+#include "cl_gpu.h"
 
 #include <cstdarg>
 #include <cstdio>
@@ -399,9 +399,9 @@ int main(int argc, char** argv) {
     };
     if (call(kOfxActionLoad, desc, nullptr, nullptr) != kOfxStatOK) return std::fprintf(stderr, "load failed\n"), 3;
     if (call(kOfxActionDescribe, desc, nullptr, nullptr) != kOfxStatOK) return std::fprintf(stderr, "describe failed\n"), 3;
-    char* cuda = nullptr;
-    getString(h(desc.props), kOfxImageEffectPropCudaRenderSupported, 0, &cuda);
-    std::printf("cuda_render_supported=%s\n", cuda ? cuda : "(none)");
+    char* opencl = nullptr;
+    getString(h(desc.props), kOfxImageEffectPropOpenCLRenderSupported, 0, &opencl);
+    std::printf("opencl_render_supported=%s\n", opencl ? opencl : "(none)");
     if (call(kOfxImageEffectActionDescribeInContext, inst, nullptr, nullptr) != kOfxStatOK) return std::fprintf(stderr, "context failed\n"), 3;
     std::printf("params=%zu clips=%zu\n", inst.params.size(), inst.clips.size());
     if (Value* opts = find(h(inst.params["profile"]->props), kOfxParamPropChoiceOption))
@@ -455,12 +455,9 @@ int main(int argc, char** argv) {
     if (!read_file(argv[2], img) || img.size() != row * height) return std::fprintf(stderr, "bad image\n"), 1;
     out_img.assign(img.size(), 0);
     for (size_t k = 0; k < out_img.size() / 4; ++k) reinterpret_cast<float*>(out_img.data())[k] = -7.0f;
-    float *src = nullptr, *dst = nullptr;
-    size_t sp = 0, dp = 0;
-    cudaMallocPitch(&src, &sp, row, height);
-    cudaMallocPitch(&dst, &dp, row, height);
-    cudaMemcpy2D(src, sp, img.data(), row, row, height, cudaMemcpyHostToDevice);
-    cudaMemcpy2D(dst, dp, out_img.data(), row, row, height, cudaMemcpyHostToDevice);
+    ClGpu gpu;
+    cl_mem src = gpu.buffer(row * height, img.data()), dst = gpu.buffer(row * height, out_img.data());
+    size_t sp = row, dp = row;
     const char* premult = std::atoi(argv[11]) ? kOfxImagePreMultiplied : kOfxImageUnPreMultiplied;
     auto param_changed = [&](const char* pname) {
         PropSet change;
@@ -589,28 +586,25 @@ int main(int argc, char** argv) {
         std::printf("match_source=%d\nmatch_state=%s\n", inst.params["matchSource"]->i, inst.params["matchState"]->s.c_str());
     set_image(*inst.clips[kOfxImageEffectSimpleSourceClipName], src, static_cast<int>(sp), width, height, premult);
     set_image(*inst.clips[kOfxImageEffectOutputClipName], dst, static_cast<int>(dp), width, height, premult);
-    cudaStream_t stream;
-    cudaStreamCreate(&stream);
     PropSet rargs;
     setDouble(h(rargs), kOfxPropTime, 0, time);
     setDouble(h(rargs), kOfxImageEffectPropRenderScale, 0, 1.0);
     setDouble(h(rargs), kOfxImageEffectPropRenderScale, 1, 1.0);
     for (int k = 0; k < 4; ++k) setInt(h(rargs), kOfxImageEffectPropRenderWindow, k, std::atoi(argv[12 + k]));
-    setInt(h(rargs), kOfxImageEffectPropCudaEnabled, 0, 0);
+    setInt(h(rargs), kOfxImageEffectPropOpenCLEnabled, 0, 0);
     int cpu = call(kOfxImageEffectActionRender, inst, &rargs, nullptr);
     std::printf("cpu_render_status=%d messages=%zu\n", cpu, gMessages.size());
-    setInt(h(rargs), kOfxImageEffectPropCudaEnabled, 0, 1);
-    setPointer(h(rargs), kOfxImageEffectPropCudaStream, 0, stream);
+    setInt(h(rargs), kOfxImageEffectPropOpenCLEnabled, 0, 1);
+    setPointer(h(rargs), kOfxImageEffectPropOpenCLCommandQueue, 0, gpu.queue);
     int st = call(kOfxImageEffectActionRender, inst, &rargs, nullptr);
-    cudaStreamSynchronize(stream);
-    std::printf("cuda_render_status=%d\n", st);
+    clFinish(gpu.queue);
+    std::printf("opencl_render_status=%d\n", st);
     for (auto& m : gMessages) std::printf("message %s\n", m.c_str());
-    cudaMemcpy2D(out_img.data(), row, dst, dp, row, height, cudaMemcpyDeviceToHost);
+    clEnqueueReadBuffer(gpu.queue, dst, CL_TRUE, 0, row * height, out_img.data(), 0, nullptr, nullptr);
     std::ofstream(argv[3], std::ios::binary).write(out_img.data(), out_img.size());
     call(kOfxActionDestroyInstance, inst, nullptr, nullptr);
     call(kOfxActionUnload, desc, nullptr, nullptr);
-    cudaStreamDestroy(stream);
-    cudaFree(src);
-    cudaFree(dst);
+    clReleaseMemObject(src);
+    clReleaseMemObject(dst);
     return st == kOfxStatOK ? 0 : 4;
 }

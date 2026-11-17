@@ -13,7 +13,7 @@ from filmemu.pipeline import Params, render
 from tests.test_w03_cuda import CLI, run_cuda
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-PROFILE = ROOT / "build" / "release" / "Fixer.ofx.bundle" / "Contents" / "Resources" / "profiles" / "synthetic-spectral"
+PROFILE = ROOT / "build" / "release" / "FixerOpenCL.ofx.bundle" / "Contents" / "Resources" / "profiles" / "synthetic-spectral"
 
 
 def load_profile():

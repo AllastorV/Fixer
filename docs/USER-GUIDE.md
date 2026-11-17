@@ -1,13 +1,13 @@
 # FIXER — user guide
 
-Free OFX plugin for DaVinci Resolve on Windows (NVIDIA, CUDA). Each profile is a film stock with its print or paper, built from the manufacturer's published technical data.
+Free OFX plugin for DaVinci Resolve on Windows, OpenCL build (AMD, Intel and NVIDIA GPUs). Each profile is a film stock with its print or paper, built from the manufacturer's published technical data.
 
 ## Install
 
 1. Close Resolve.
-2. Run `install.bat` and accept the administrator prompt. It copies `Fixer.ofx.bundle` to `C:\Program Files\Common Files\OFX\Plugins`.
-3. In Resolve: Preferences → Memory and GPU → GPU processing mode **CUDA**. There is no CPU or OpenCL path; with OpenCL Resolve shows a generic "Open FX Error".
-4. Color page → Effects → OpenFX → FIXER → **FIXER**. A new node starts on Kodak Vision3 250D with its 2383 print, Lab scan on, grain and halation at their defaults.
+2. Run `install.bat` and accept the administrator prompt. It copies `FixerOpenCL.ofx.bundle` to `C:\Program Files\Common Files\OFX\Plugins`.
+3. In Resolve: Preferences → Memory and GPU → GPU processing mode **OpenCL**. There is no CPU or CUDA path in this build; for CUDA use the separate FIXER CUDA build.
+4. Color page → Effects → OpenFX → FIXER → **FIXER OpenCL**. A new node starts on Kodak Vision3 250D with its 2383 print, Lab scan on, grain and halation at their defaults.
 
 ## The one rule: the plugin is the display transform
 

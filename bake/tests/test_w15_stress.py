@@ -88,7 +88,7 @@ class HostilePixels(unittest.TestCase):
                         r0, base, _ = run(clean, tmp, **kw)
                         r1, out, _ = run(dirty, tmp, **kw)
                         self.assertEqual(r1.returncode, 0, r1.stdout + r1.stderr)
-                        self.assertIn("cuda_render_status=0", r1.stdout)
+                        self.assertIn("opencl_render_status=0", r1.stdout)
                         self.assertTrue(np.isfinite(out).all(), f"non-finite output pixels: {int((~np.isfinite(out)).sum())}")
                         far = np.abs(out[:, 64:, :3] - base[:, 64:, :3]).max()
                         worst = max(worst, float(far))
@@ -140,7 +140,7 @@ class Geometry(unittest.TestCase):
                         img = frame(h, w, h * 31 + w)
                         r, out, _ = run(img, tmp, grain=(1.0, 3.0, 1, 0.0), spatial=(1.0, 50.0, 1.0), extra=["--press", glow])
                         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-                        self.assertIn("cuda_render_status=0", r.stdout)
+                        self.assertIn("opencl_render_status=0", r.stdout)
                         self.assertFalse((out == -7.0).any(), "pixels inside the window were not written")
                         self.assertTrue(np.isfinite(out).all())
 
@@ -205,8 +205,8 @@ class ExtremeParameters(unittest.TestCase):
                         r, out, _ = run(img, tmp, out_space=space, **c)
                         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                         if "impact" in c or "exposure" in c:
-                            self.assertIn("cuda_render_status=0", r.stdout)
-                        if "cuda_render_status=0" in r.stdout:
+                            self.assertIn("opencl_render_status=0", r.stdout)
+                        if "opencl_render_status=0" in r.stdout:
                             self.assertTrue(np.isfinite(out).all(), f"{int((~np.isfinite(out)).sum())} non-finite pixels")
 
     def test_every_stock_survives_hostile_frame(self):
@@ -216,7 +216,7 @@ class ExtremeParameters(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             for pid in PROFILE_INDEX:
                 r, out, _ = run(img, tmp, profile=pid, out_space="rec709_g24", grain=(0.5, 1.0, 1, 0.0), spatial=(0.3, 1.0, 0.3))
-                if r.returncode or "cuda_render_status=0" not in r.stdout or not np.isfinite(out).all():
+                if r.returncode or "opencl_render_status=0" not in r.stdout or not np.isfinite(out).all():
                     bad.append(pid)
         self.assertEqual(bad, [])
 
@@ -273,7 +273,7 @@ class HostileState(unittest.TestCase):
                 path.write_text(text, encoding="utf-8", errors="surrogatepass")
                 for flag in ("--match-state", "--look-load"):
                     r, out, _ = run(img, tmp, extra=[flag, str(path), "--match-strength", "0.8"])
-                    if r.returncode != 0 or "cuda_render_status=0" not in r.stdout:
+                    if r.returncode != 0 or "opencl_render_status=0" not in r.stdout:
                         crashed.append((why, flag, r.returncode, r.stderr[-200:]))
                     elif not np.isfinite(out).all():
                         nonfinite.append((why, flag))
@@ -402,7 +402,7 @@ class HostileReference(unittest.TestCase):
                     if why in ("empty", "text", "truncated", "zero size", "directory", "fake jpeg", "huge header", "jpeg truncated") and ok:
                         problems.append((why, source, "broken reference accepted"))
                     if why in ("unicode path", "one pixel", "black", "white", "pure red", "jpeg", "jpeg motion photo", "png trailing data") and not ok:
-                        problems.append((why, source, "usable reference refused", [l for l in r.stdout.splitlines() if "FIXER" in l and "needs CUDA" not in l][-1:]))
+                        problems.append((why, source, "usable reference refused", [l for l in r.stdout.splitlines() if "FIXER" in l and "needs OpenCL" not in l][-1:]))
         self.assertEqual(problems, [])
 
     def test_create_grade_on_flat_and_hostile_frames(self):
@@ -487,7 +487,7 @@ class HostileLookNames(unittest.TestCase):
                     continue
                 ok = "look_load_status=0" in r.stdout
                 if why in ("crlf pretty", "utf8 bom") and not ok:
-                    problems.append((why, "valid look refused", [l for l in r.stdout.splitlines() if "FIXER" in l and "needs CUDA" not in l][-1:]))
+                    problems.append((why, "valid look refused", [l for l in r.stdout.splitlines() if "FIXER" in l and "needs OpenCL" not in l][-1:]))
                 if why in ("binary", "huge") and ok:
                     problems.append((why, "garbage accepted"))
                 if not np.isfinite(out).all():

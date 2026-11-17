@@ -18,8 +18,8 @@ from tests.test_w03_cuda import SPACE_ID, make_image
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 BUILD = ROOT / "build" / "release"
 HOST = BUILD / "ofx_test_host.exe"
-BUNDLE = BUILD / "Fixer.ofx.bundle"
-PLUGIN = BUNDLE / "Contents" / "Win64" / "Fixer.ofx"
+BUNDLE = BUILD / "FixerOpenCL.ofx.bundle"
+PLUGIN = BUNDLE / "Contents" / "Win64" / "FixerOpenCL.ofx"
 RES = BUNDLE / "Contents" / "Resources"
 
 
@@ -82,7 +82,7 @@ class OfxAdapter(unittest.TestCase):
     def test_describe_and_full_frame(self):
         log, err = self.check(Params(), (0, 0, 37, 23), 0)
         self.assertIn("plugin=com.alpcavas.fixer", log)
-        self.assertIn("cuda_render_supported=true", log)
+        self.assertIn("opencl_render_supported=true", log)
         self.assertIn("params=48 clips=2", log)
         self.assertIn("profile_id=synthetic-test", log)
         for pid, i in PROFILE_INDEX.items():
@@ -103,7 +103,7 @@ class OfxAdapter(unittest.TestCase):
     def test_cpu_render_refused_with_message(self):
         log, _ = self.check(Params(), (0, 0, 37, 23), 3)
         self.assertIn("cpu_render_status=1", log)
-        self.assertIn("needs CUDA", log)
+        self.assertIn("needs OpenCL", log)
 
     def test_identity_profile_passes_image_through(self):
         img = make_image("dwg_di", 5)
@@ -131,13 +131,13 @@ class OfxAdapter(unittest.TestCase):
 
     def test_corrupt_profile_is_excluded(self):
         with tempfile.TemporaryDirectory() as d:
-            copy = pathlib.Path(d) / "Fixer.ofx.bundle"
+            copy = pathlib.Path(d) / "FixerOpenCL.ofx.bundle"
             shutil.copytree(BUNDLE, copy)
             bad = copy / "Contents" / "Resources" / "profiles" / "identity" / "under.bin"
             bad.write_bytes(bad.read_bytes()[:1000])
             img = make_image("dwg_di", 6)
             (pathlib.Path(d) / "in.raw").write_bytes(img.tobytes())
-            args = [str(HOST), str(copy / "Contents" / "Win64" / "Fixer.ofx"), str(pathlib.Path(d) / "in.raw"),
+            args = [str(HOST), str(copy / "Contents" / "Win64" / "FixerOpenCL.ofx"), str(pathlib.Path(d) / "in.raw"),
                     str(pathlib.Path(d) / "out.raw"), "37", "23", "0", "0", "0", "0", "1", "0", "0", "0", "37", "23", "0"]
             r = subprocess.run(args, capture_output=True, text=True)
         self.assertIn(f"profile_option 0 {profile_label([p for p in PROFILE_IDS if p != 'identity'][0])}", r.stdout)

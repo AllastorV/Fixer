@@ -15,7 +15,7 @@ from filmemu import spaces
 from filmemu.pipeline import Params, render
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-PROFILES = ROOT / "build" / "release" / "Fixer.ofx.bundle" / "Contents" / "Resources" / "profiles"
+PROFILES = ROOT / "build" / "release" / "FixerOpenCL.ofx.bundle" / "Contents" / "Resources" / "profiles"
 PROFILE = "kodak-vision3-250d-2383"
 W, H = 1920, 1080
 MAX_TOL, P99_TOL = 1e-2, 2e-3
