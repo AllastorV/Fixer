@@ -68,7 +68,7 @@ Project Settings: ACEScct, ACES Output Transform **No Output Transform**. FIXER 
 
 | Symptom | Cause / fix |
 |---|---|
-| "Open FX Error … could not be run" | GPU processing mode is not CUDA. Set CUDA and restart Resolve. |
+| "Open FX Error … could not be run" | GPU processing mode is not OpenCL. Set OpenCL and restart Resolve. |
 | Flat, dim or doubly contrasty picture | A second tone mapping is on (Output DRT / ACES ODT). Turn it off, see the node trees. |
 | Clipped or odd colours | Input colour space of the node does not match the incoming image. |
 | Grain too coarse in a proxy/timeline at another resolution | Grain size follows frame height; check that the clip is not scaled after the plugin. |
