@@ -1085,6 +1085,8 @@ void define_saved_looks(OfxParamSetHandle params) {
 
 OfxStatus create_grade(OfxImageEffectHandle effect, OfxTime t) {
     std::string ref_path = get_string(effect, "matchFile", t);
+    ref_path.erase(0, ref_path.find_first_not_of(" \t\r\n\""));
+    ref_path.erase(ref_path.find_last_not_of(" \t\r\n\"") + 1);
     if (ref_path.empty()) return fail_msg(effect, "FIXER: choose a reference image first (Reference match > Reference).");
     int profile = resolve_profile(effect, t);
     if (profile < 0 || profile >= static_cast<int>(gProfiles.size()))
