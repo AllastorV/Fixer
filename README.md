@@ -104,6 +104,15 @@ The [test tools](bake/tools) include Resolve render comparisons, stock and param
 
 An OpenCL build for AMD, Intel and NVIDIA GPUs lives on the `opencl` branch. Planned work includes Metal for macOS and more film stocks.
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+- Committers and reviewers: [AllastorV](https://github.com/AllastorV)
+- Approvers: [AllastorV](https://github.com/AllastorV)
+
+Privacy policy: This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it.
+
 ## License and image credits
 
 FIXER is licensed under [Apache-2.0](LICENSE). Film names identify the stocks being emulated. See [NOTICE](NOTICE) for project attribution.
