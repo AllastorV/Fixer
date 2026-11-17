@@ -2,16 +2,17 @@
 
 ![FIXER](docs/brand/fixer-banner-photo@2x.png)
 
-[![OpenCL](https://img.shields.io/badge/GPU-OpenCL-ED1C24)](#install)
+[![AMD OpenCL](https://img.shields.io/badge/AMD-OpenCL-ED1C24?logo=amd&logoColor=white)](#install)
+[![NVIDIA CUDA](https://img.shields.io/badge/NVIDIA-CUDA-76B900?logo=nvidia&logoColor=white)](https://github.com/AllastorV/Fixer#install)
 [![Download source ZIP](https://img.shields.io/badge/Source-ZIP-24292F?logo=github)](https://github.com/AllastorV/Fixer/archive/refs/tags/v1.1.1-opencl.zip)
 [![Download Windows x64 installer EXE](https://img.shields.io/badge/Download-Windows%20x64%20EXE-0078D4)](https://github.com/AllastorV/Fixer/releases/download/v1.1.1-opencl/FIXER-1.1.1-win64-opencl-setup.exe)
 [![Apache 2.0 license](https://img.shields.io/badge/License-Apache%202.0-blue)](LICENSE)
 
 **Free, open-source film emulation and reference matching for DaVinci Resolve.**
 
-FIXER models 41 film stocks from manufacturers’ published technical data, including cinema negatives with print film, still negatives with photographic paper, and directly viewed slides.
+FIXER models 42 film stocks from manufacturers’ published technical data, including cinema negatives with print film, still negatives with photographic paper, directly viewed slides, and the experimental near-infrared Ilford SFX 200.
 
-**Windows x64 · OpenFX**
+**Windows x64 · OpenFX · OpenCL for AMD, Intel and NVIDIA**
 
 [Film emulation](#film-emulation) · [Film controls](#film-controls) · [Reference match](#reference-match) · [Install](#install) · [User guide](docs/USER-GUIDE.md)
 
@@ -57,7 +58,7 @@ Matching transfers tone, saturation and colour casts from the reference. **Simpl
 
 ### Windows installer (EXE)
 
-This is the OpenCL build for AMD, Intel and NVIDIA GPUs. Requires 64-bit Windows, DaVinci Resolve and a GPU with OpenCL 1.2. The CUDA build lives on the `main` branch. The installer includes the FIXER OpenFX plugin and its ready-to-use film profiles and LUTs.
+This is the OpenCL build for AMD, Intel and NVIDIA GPUs. Requires 64-bit Windows, DaVinci Resolve and a GPU with OpenCL 1.2. The CUDA build lives on the `main` branch. The installer includes the FIXER OpenFX plugin and its ready-to-use film profiles and LUTs. It installs next to the CUDA build without replacing it. Tested with DaVinci Resolve Studio 21.2.
 
 1. Close DaVinci Resolve.
 2. Download and run [FIXER OpenCL v1.1.1 for Windows x64](https://github.com/AllastorV/Fixer/releases/download/v1.1.1-opencl/FIXER-1.1.1-win64-opencl-setup.exe). Accept the Windows administrator prompt and complete setup.
@@ -89,7 +90,7 @@ From the repository root after building, run the Python, OpenCL and OFX tests.
 
 ```bat
 cd bake
-python -m unittest discover -s tests -p "test_*.py"
+for %f in (tests\test_*.py) do python -m unittest tests.%~nf
 ```
 
 The [test tools](bake/tools) include Resolve render comparisons, stock and parameter checks, and Lab scan fitting. See the [numeric contract](docs/W01-numeric-contract.md) for tolerances.
