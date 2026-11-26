@@ -13,6 +13,8 @@ FIXER models 42 film stocks from manufacturers’ published technical data, incl
 
 **Windows x64 · OpenFX · NVIDIA CUDA, or OpenCL for AMD and Intel**
 
+**Tested with DaVinci Resolve Studio 21.2.**
+
 [Film emulation](#film-emulation) · [Film controls](#film-controls) · [Reference match](#reference-match) · [Install](#install) · [User guide](docs/USER-GUIDE.md)
 
 ## Film emulation
